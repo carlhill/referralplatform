@@ -7,6 +7,30 @@ functional/non-functional requirements, and root `CONVENTIONS.md` for the
 patterns every service follows (this service is stamped from that template —
 structure, scripts, and file layout are identical across all 12 services).
 
+See `BUILD_LOG/identity-access.md` for what's built, key decisions, mocked
+pieces, and known gaps.
+
+## What this service owns
+
+Passkey/OIDC login itself happens against Keycloak (`infra/keycloak/realm-export.json`
+— WebAuthn policy + the `clinician-browser`/`patient-carer-browser` custom
+authentication flows). This service exposes:
+
+- `GET /passkeys`, `DELETE /passkeys/:credentialId` (step-up gated),
+  `POST /passkeys/require-reenrolment` — manage a caller's own WebAuthn
+  credentials via Keycloak's Admin API (`src/passkeys`, `src/keycloak-admin`).
+- `POST /account/social-links/:provider/link-url`, `GET /account/social-links`,
+  `DELETE /account/social-links/:provider` — the only place a Google/Microsoft
+  secondary sign-in link can be initiated; every route requires an
+  already-authenticated caller (`src/account-links`).
+- `GET/POST /mock-myid/*` — **MOCK, replace with real integration**: an
+  in-process OIDC identity provider standing in for myID (TDIF), which
+  Keycloak's `myid` broker points at in local dev (`src/mock-myid`).
+
+All routes except `/health` and `/mock-myid/*` require a verified bearer
+token (`requireAuth` middleware from `packages/auth-client`, wired in
+`app.module.ts`).
+
 ## Run locally
 
 ```bash

@@ -10,6 +10,52 @@
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
   "accessTokenLifespan": 300,
+
+  "_webAuthnPolicyComment": "Two-factor WebAuthn policy (security-key-as-second-factor, alongside a password) — used where a flow adds webauthn-authenticator as an additional factor rather than a full passwordless replacement. See identity-security-recommendations.md section 6.",
+  "webAuthnPolicyRpEntityName": "ReferralPlatform",
+  "webAuthnPolicyRpId": "",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyAttestationConveyancePreference": "none",
+  "webAuthnPolicyAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyRequireResidentKey": "not specified",
+  "webAuthnPolicyUserVerificationRequirement": "preferred",
+  "webAuthnPolicyCreateTimeout": 60,
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": false,
+  "webAuthnPolicyAcceptableAaguids": [],
+
+  "_webAuthnPolicyPasswordlessComment": "Passwordless (\"passkey\") WebAuthn policy — the credential the clinician-browser flow makes MANDATORY (AAL2/AAL3, no password fallback — see identity-security-recommendations.md section 6) and the patient-carer-browser flow offers as the encouraged, phishing-resistant alternative to password+OTP. Keycloak has exactly one policy of each kind per realm, not one per client/role — the assurance-level difference between clinician and patient/carer principals is enforced by which authentication flow requires vs. offers it (see authenticationFlows below), not by two different WebAuthn policies.",
+  "webAuthnPolicyPasswordlessRpEntityName": "ReferralPlatform",
+  "webAuthnPolicyPasswordlessRpId": "",
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessCreateTimeout": 60,
+  "webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister": false,
+  "webAuthnPolicyPasswordlessAcceptableAaguids": [],
+
+  "requiredActions": [
+    {
+      "alias": "webauthn-register",
+      "name": "Webauthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 70,
+      "config": {}
+    },
+    {
+      "alias": "webauthn-register-passwordless",
+      "name": "Webauthn Register Passwordless",
+      "providerId": "webauthn-register-passwordless",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 80,
+      "config": {}
+    }
+  ],
+
   "roles": {
     "realm": [
       {
@@ -199,6 +245,10 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
+      },
+      "_authenticationFlowBindingOverridesComment": "GP is a clinician principal type — passkey/hardware key is MANDATORY (AAL2/AAL3), not optional. See identity-security-recommendations.md section 6 and modules-and-requirements.md (\"Identity & Access\").",
+      "authenticationFlowBindingOverrides": {
+        "browser": "b6f10000-0000-4000-8000-0000000000c1"
       }
     },
     {
@@ -217,6 +267,10 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
+      },
+      "_authenticationFlowBindingOverridesComment": "Specialist is a clinician principal type — same mandatory-passkey rationale as gp-portal above.",
+      "authenticationFlowBindingOverrides": {
+        "browser": "b6f10000-0000-4000-8000-0000000000c1"
       }
     },
     {
@@ -235,6 +289,10 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
+      },
+      "_authenticationFlowBindingOverridesComment": "Patient/carer principal type — passkey encouraged, password+OTP fallback acceptable (AAL1/AAL2). See identity-security-recommendations.md section 6.",
+      "authenticationFlowBindingOverrides": {
+        "browser": "b6f10000-0000-4000-8000-0000000000b1"
       }
     },
     {
@@ -253,6 +311,21 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
+      },
+      "_authenticationFlowBindingOverridesComment": "Same patient/carer flow as patient-web above. NOTE (see claude/solution-architecture-tech-stack.md, \"Frontend\"): native passkey/WebAuthn support through Expo/React Native is flagged there as still maturing — patient-mobile should validate iOS AutoFill / Android Credential Manager passkey support directly before relying on this flow requiring it; password+OTP remains a first-class fallback here specifically because of that risk.",
+      "authenticationFlowBindingOverrides": {
+        "browser": "b6f10000-0000-4000-8000-0000000000b1"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-identity-access-service",
+      "enabled": true,
+      "serviceAccountClientId": "identity-access-service",
+      "_clientRolesComment": "Grants this service's Keycloak client-credentials service account the realm-management roles it needs to call the Admin REST API on a caller's own behalf (list/revoke WebAuthn credentials, force re-enrolment, list/remove federated identities) — see services/identity-access/src/keycloak-admin/keycloak-admin.service.ts. Deliberately NOT manage-realm or manage-clients — least privilege.",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users"]
       }
     }
   ],
@@ -263,6 +336,10 @@
       "enabled": false,
       "trustEmail": true,
       "storeToken": false,
+      "_secondaryLinkOnlyComment": "linkOnly=true is the actual enforcement mechanism for 'social login is a secondary sign-in method, never a way to create or activate an account' (see claude/solution-architecture-tech-stack.md and claude/modules-and-requirements.md, 'Identity & Access'). With linkOnly set, Keycloak refuses to use this IdP for a fresh login or first-broker-login registration at all — it will not even appear on the login page (hideOnLoginPage) — and can ONLY be reached via the Client Initiated Account Linking endpoint (/realms/{realm}/broker/google/link), which requires an already-valid Keycloak SSO session. services/identity-access/src/account-links is the one place in this platform that constructs that link URL, and it requires a verified bearer token before doing so — see that module for the second, application-layer enforcement of the same constraint. firstBrokerLoginFlowAlias is set as defense-in-depth on top of linkOnly, not instead of it: 'social-linking-only' (below) has no create-new-user branch at all.",
+      "hideOnLoginPage": true,
+      "linkOnly": true,
+      "firstBrokerLoginFlowAlias": "social-linking-only",
       "config": {
         "clientId": "REPLACE_ME",
         "clientSecret": "REPLACE_ME",
@@ -275,11 +352,117 @@
       "enabled": false,
       "trustEmail": true,
       "storeToken": false,
+      "_secondaryLinkOnlyComment": "Same linkOnly enforcement as google above. Also the practice-tenant SSO path noted in solution-architecture-tech-stack.md ('a lot of AU GP and specialist practices already run Microsoft 365/Entra ID') — still secondary-link-only, never account creation, for the same identity-binding reason.",
+      "hideOnLoginPage": true,
+      "linkOnly": true,
+      "firstBrokerLoginFlowAlias": "social-linking-only",
       "config": {
         "clientId": "REPLACE_ME",
         "clientSecret": "REPLACE_ME",
         "syncMode": "IMPORT"
       }
+    },
+    {
+      "alias": "myid",
+      "providerId": "oidc",
+      "enabled": false,
+      "trustEmail": false,
+      "storeToken": false,
+      "_mockComment": "MOCK — replace with real integration. Points at services/identity-access's in-process mock OIDC IdP (src/mock-myid) standing in for myID (TDIF) — see claude/solution-architecture-tech-stack.md, 'Identity and access' ('Keycloak can be configured as an OIDC relying party against a TDIF-accredited identity provider, which is exactly the lightweight path already recommended over seeking TDIF accreditation directly'). Unlike google/microsoft this is NOT linkOnly: identity-security-recommendations.md section 6 frames myID as an optional HIGHER-assurance path (government-grade IP2/IP3 proofing) for elevation to authorised-representative tier or GP/specialist onboarding — a legitimate future account-creation-adjacent use that belongs to the Onboarding & Account Service's flow, not this realm config. It ships disabled (enabled:false) because it isn't wired into any auto-provisioning flow yet — flip to true only once that integration exists. URLs use the docker-compose service hostname (identity-access:3001), matching MOCK_MYID_ISSUER_BASE_URL in services/identity-access/docker-compose.yml env.",
+      "config": {
+        "clientId": "referralplatform-myid-stub",
+        "clientSecret": "change-me-in-local-env",
+        "authorizationUrl": "http://identity-access:3001/mock-myid/authorize",
+        "tokenUrl": "http://identity-access:3001/mock-myid/token",
+        "userInfoUrl": "http://identity-access:3001/mock-myid/userinfo",
+        "jwksUrl": "http://identity-access:3001/mock-myid/jwks",
+        "issuer": "http://identity-access:3001/mock-myid",
+        "useJwksUrl": "true",
+        "validateSignature": "true",
+        "syncMode": "IMPORT",
+        "defaultScope": "openid profile email"
+      }
     }
-  ]
+  ],
+  "authenticationFlows": [
+    {
+      "id": "b6f10000-0000-4000-8000-0000000000b1",
+      "alias": "patient-carer-browser",
+      "description": "Browser login for patient/carer principals — passkey (WebAuthn passwordless) encouraged, password+OTP fallback acceptable (AAL1/AAL2). See identity-security-recommendations.md section 6 and modules-and-requirements.md ('Identity & Access').",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "authenticator": "identity-provider-redirector", "requirement": "ALTERNATIVE", "priority": 20, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "requirement": "REQUIRED", "priority": 30, "autheticatorFlow": true, "flowAlias": "patient-carer-browser Forms" }
+      ]
+    },
+    {
+      "alias": "patient-carer-browser Forms",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-username-form", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "requirement": "REQUIRED", "priority": 20, "autheticatorFlow": true, "flowAlias": "patient-carer-browser Credential" }
+      ]
+    },
+    {
+      "alias": "patient-carer-browser Credential",
+      "description": "Either a passwordless passkey (preferred) or password+conditional-OTP (fallback) — offered as alternatives, not stacked, matching how passkey login actually works (it replaces the password step, not adds to it).",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "webauthn-passwordless-authenticator", "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": true, "autheticatorFlow": false },
+        { "requirement": "ALTERNATIVE", "priority": 20, "autheticatorFlow": true, "flowAlias": "patient-carer-browser Password+OTP" }
+      ]
+    },
+    {
+      "alias": "patient-carer-browser Password+OTP",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-password-form", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "authenticator": "conditional-user-configured", "requirement": "CONDITIONAL", "priority": 20, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "authenticator": "auth-otp-form", "requirement": "REQUIRED", "priority": 30, "userSetupAllowed": false, "autheticatorFlow": false }
+      ]
+    },
+    {
+      "id": "b6f10000-0000-4000-8000-0000000000c1",
+      "alias": "clinician-browser",
+      "description": "Browser login for GP/specialist principals — passkey or hardware security key is MANDATORY (AAL2/AAL3), no password/OTP fallback. See identity-security-recommendations.md section 6 ('GPs and specialists ... passkey or hardware security key should be mandatory, not optional') and modules-and-requirements.md ('Identity & Access').",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "requirement": "REQUIRED", "priority": 20, "autheticatorFlow": true, "flowAlias": "clinician-browser Forms" }
+      ]
+    },
+    {
+      "alias": "clinician-browser Forms",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-username-form", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "authenticator": "webauthn-passwordless-authenticator", "requirement": "REQUIRED", "priority": 20, "userSetupAllowed": true, "autheticatorFlow": false }
+      ]
+    },
+    {
+      "alias": "social-linking-only",
+      "description": "First-broker-login flow for google/microsoft — defense-in-depth alongside linkOnly (see the identityProviders entries above): contains ONLY 'Confirm Link Existing Account', no 'Create User If Unique' branch, so even a future config mistake that flips linkOnly off cannot cause this flow to silently create a new account from a brokered login.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "idp-confirm-link", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false }
+      ]
+    }
+  ],
+  "_stepUpAuthenticationComment": "Step-up authentication for sensitive actions (revoking a passkey — see services/identity-access/src/passkeys — approving a new GP link, granting deceased-patient access) is READ by services/identity-access/src/common/step-up against the acr/amr claims, but this realm does not yet define the Conditional-OTP/ACR-to-LoA authentication flow that would actually populate a distinguishable elevated acr value after a fresh passkey re-auth — see infra/keycloak/README.md, 'What's NOT in here yet'. Documented here as a known, load-bearing gap rather than silently assumed to work.",
+  "_carerVsPatientFlowComment": "The carer-vs-patient / OTP account-creation branch (identity-security-recommendations.md section 3) is intentionally NOT modelled as a Keycloak authentication flow — per infra/keycloak/README.md this belongs to the Onboarding & Account Service, which orchestrates it in front of Keycloak (SMS link → DOB/Medicare verify → branch → OTP → Keycloak user creation), not inside a realm's login flow. See that service's own build for its implementation."
 }

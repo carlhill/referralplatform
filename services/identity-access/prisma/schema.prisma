@@ -19,9 +19,44 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// Single-use nonce issued when an already-authenticated principal (patient,
+/// carer, GP, specialist, or internal staff — see AuthenticatedPrincipal in
+/// packages/auth-client) requests to link a secondary Google/Microsoft
+/// sign-in method to their existing, already identity-verified account.
+///
+/// This row is what lets `POST /account/social-links/:provider/link-url`
+/// (see src/account-links) be genuinely safe: the nonce/hash pair it produces
+/// is consumed by Keycloak's "Client Initiated Account Linking" broker
+/// endpoint (`GET /realms/{realm}/broker/{provider}/link`), which Keycloak
+/// only honours for a provider configured with `linkOnly: true` (see
+/// infra/keycloak/realm-export.json) — i.e. this mechanism can only ever
+/// attach a social identity to an account that already exists and is already
+/// logged in; it can never create or activate one. See
+/// claude/solution-architecture-tech-stack.md ("Identity and access") and
+/// claude/modules-and-requirements.md ("Identity & Access") for why this
+/// constraint is load-bearing, not incidental.
+model AccountLinkRequest {
+  id            String    @id @default(uuid())
+  /// The Keycloak subject id (AuthenticatedPrincipal.sub) of the caller who
+  /// requested the link — always populated from a verified bearer token,
+  /// never from client-supplied input.
+  principalId   String
+  principalType String
+  /// 'google' | 'microsoft' — enforced at the application layer against the
+  /// allow-list in src/account-links/account-links.service.ts; 'myid' and any
+  /// internal service alias are rejected before a row is ever created.
+  provider      String
+  nonce         String    @unique
+  /// The Keycloak SSO session id (the `sid` claim of the caller's ID token,
+  /// supplied by the frontend — see account-links.service.ts for why this
+  /// service cannot derive it itself from an access token alone).
+  sessionId     String
+  createdAt     DateTime  @default(now())
+  /// Short TTL (see account-links.service.ts) — a stale, unconsumed link
+  /// request must not remain usable.
+  expiresAt     DateTime
+  consumedAt    DateTime?
+
+  @@index([principalId])
+  @@index([expiresAt])
+}

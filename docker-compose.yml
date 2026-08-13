@@ -108,7 +108,11 @@ services:
     healthcheck:
       <<: *healthcheck-defaults
       start_period: 40s
-      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/8080 && echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "UP" <&3']
+      test:
+        [
+          'CMD-SHELL',
+          'exec 3<>/dev/tcp/localhost/8080 && echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "UP" <&3',
+        ]
 
   mailhog:
     image: mailhog/mailhog:v1.0.1
@@ -135,6 +139,13 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=identity_access
       KEYCLOAK_CLIENT_ID: identity-access-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      ACCOUNT_LINK_ALLOWED_ORIGINS: http://localhost:3100,http://localhost:3101,http://localhost:3102,http://localhost:8081
+      STEP_UP_ACR: passkey
+      # MOCK myID (TDIF) relying-party stub — see services/identity-access/src/mock-myid.
+      # Must be the address Keycloak's container can reach, not "localhost".
+      MOCK_MYID_CLIENT_ID: referralplatform-myid-stub
+      MOCK_MYID_CLIENT_SECRET: change-me-in-local-env
+      MOCK_MYID_ISSUER_BASE_URL: http://identity-access:3001/mock-myid
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

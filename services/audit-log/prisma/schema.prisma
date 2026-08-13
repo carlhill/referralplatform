@@ -19,9 +19,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+// Relational metadata only — never the audit entries themselves (those live in
+// immudb; see claude/audit-log-architecture-decision.md and .env.example's
+// IMMUDB_* comment). This index exists because immudb is a verifiable
+// key/value store: it can prove a single key's history hasn't been tampered
+// with, but it has no secondary-index query engine of its own. So this table
+// is what lets the query API answer "every event for Referral X" without
+// scanning all of immudb — the source of truth for content + tamper-evidence
+// is always immudb, this table just points at it.
+model AuditEventIndex {
+  /// Same id as the AuditEvent (shared-types) / the immudb key suffix.
+  id                 String   @id
+  type               String
+  actorPrincipalType String
+  actorId            String
+  subjectType        String
+  subjectId          String
+  occurredAt         DateTime
+  /// immudb key this event's envelope was written under (see ImmudbService).
+  immudbKey          String
+  /// immudb transaction id returned by verifiedSet — proof anchor for verify().
+  immudbTxId         String
+  /// Which NASH (mock) signing key signed this entry — lets verify() find the right public key.
+  nashKeyId          String
+  createdAt          DateTime @default(now())
+
+  @@index([subjectType, subjectId])
+  @@index([type])
+  @@map("audit_event_index")
+}

@@ -6,9 +6,9 @@
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// Module #9 of modules-and-requirements.md (Booking Service) — see
+// BUILD_LOG/booking.md for the full design rationale, what's mocked, and
+// known gaps.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +19,176 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// A specialist's connected calendar (Google / Outlook / CalDAV) — the
+/// free/busy source of truth this service syncs `Slot` rows from and writes
+/// confirmed bookings back to. See specialist-directory-booking.md: "ask the
+/// specialist to connect whatever calendar they already use, for free/busy
+/// visibility" — deliberately NOT a PMS integration (no incumbent practice
+/// software exposes a real-time appointment API — see that doc).
+///
+/// Simplification (documented judgment call, see BUILD_LOG/booking.md): one
+/// active calendar connection per specialist, not per-location/per-calendar.
+/// A specialist with multiple calendars would need multi-calendar support in
+/// a future iteration.
+model CalendarConnection {
+  id                 String    @id @default(uuid())
+  specialistId       String    @unique
+  /// google | outlook | caldav — see calendar/calendar-client.interface.ts.
+  provider           String
+  /// Opaque handle the mock/real calendar client uses to address this
+  /// specialist's calendar (a calendar id for Google/Outlook, a feed URL for
+  /// CalDAV). Never a raw OAuth secret — those belong in Secrets Manager
+  /// (root CONVENTIONS.md §10), referenced here only by an opaque credential
+  /// reference id in a real deployment.
+  externalCalendarId String
+  connected          Boolean   @default(true)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  slots              Slot[]
+
+  @@index([provider])
+  @@map("calendar_connection")
+}
+
+/// One bookable/free-busy time window on a specialist's calendar, synced
+/// from `CalendarConnection` (source = 'calendar_sync') or created directly
+/// for testing/ops (source = 'manual').
+///
+/// **This is the concurrency-critical table.** `status` + the unique
+/// (specialistId, startsAt) constraint + the atomic
+/// `UPDATE ... WHERE status = 'open'` pattern used by
+/// BookingService.confirmSlot() (see that method's doc comment) are what
+/// make concurrent booking attempts on the same slot safe — see
+/// BUILD_LOG/booking.md, "Concurrency-safe slot booking" for the full
+/// explanation and the test that proves it against a real Postgres
+/// instance.
+model Slot {
+  id                   String              @id @default(uuid())
+  specialistId         String
+  startsAt             DateTime
+  endsAt               DateTime
+  /// open | booked. (No separate "held"/"cancelled" state — a released slot
+  /// goes straight back to 'open' for reuse; see BUILD_LOG/booking.md for
+  /// why this two-state model was chosen over a richer one.)
+  status               String              @default("open")
+  /// Optimistic-concurrency token — incremented on every claim/release.
+  /// Not itself the concurrency-safety mechanism (the atomic
+  /// `WHERE status = 'open'` guard is), but exposed on `Booking.slotVersion`
+  /// per shared-types' `Booking` interface and useful for detecting stale
+  /// client-side slot listings.
+  version              Int                 @default(0)
+  /// Set exactly when status = 'booked'. Nullable + NOT unique-across-nulls
+  /// is fine in Postgres (a unique index treats multiple NULLs as distinct),
+  /// so many simultaneously-open slots can all have bookingId = null.
+  bookingId            String?             @unique
+  source               String              @default("calendar_sync")
+  externalEventId      String?
+  calendarConnectionId String?
+  calendarConnection   CalendarConnection? @relation(fields: [calendarConnectionId], references: [id])
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@unique([specialistId, startsAt])
+  @@index([specialistId, status, startsAt])
+  @@map("slot")
+}
+
+/// A patient's booking request against a referral — module #9's core
+/// record. Mirrors packages/shared-types/src/booking.ts's `Booking`
+/// interface (that's the cross-service contract; this table is this
+/// service's storage of it).
+model Booking {
+  id                      String    @id @default(uuid())
+  referralId              String
+  patientId               String
+  specialistId            String
+
+  /// preference_captured | waitlisted | confirmed | cancelled | completed
+  status                  String    @default("preference_captured")
+  /// Bypasses preference negotiation — module 4's "urgent fast-path flag
+  /// set? -> earliest available slot offered directly" branch
+  /// (business-process-flow.md).
+  urgentFastPath          Boolean   @default(false)
+
+  preferredDayOfWeek      String?
+  /// morning | afternoon | evening
+  preferredTimeOfDay      String?
+
+  slotId                  String?
+  confirmedSlotStartsAt   DateTime?
+  confirmedSlotEndsAt     DateTime?
+  /// Snapshot of Slot.version at confirmation time — shared-types'
+  /// optimistic-concurrency field, carried through onto the booking record.
+  slotVersion             Int       @default(0)
+
+  waitlistedAt             DateTime?
+  cancelledAt               DateTime?
+  cancellationReason        String?
+
+  /// Two-way calendar sync reference — the Google/Outlook/CalDAV event id
+  /// created when this booking was confirmed (calendar/calendar-client.interface.ts).
+  externalCalendarEventId String?
+
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  waitlistEntry            WaitlistEntry?
+
+  @@index([patientId])
+  @@index([specialistId])
+  @@index([referralId])
+  @@index([status])
+  @@map("booking")
+}
+
+/// The waitlist — module #9's "waitlist management with auto-notify-on-open"
+/// requirement (specialist-directory-booking.md: "if a preferred slot opens
+/// up later ... the patient gets proactively notified and can claim it").
+/// One entry per waitlisted Booking; matched FIFO-within-best-preference-fit
+/// against newly-opened Slots by WaitlistService.fillFromOpenSlots() — see
+/// that method's doc comment for the matching/claim semantics and the
+/// documented simplification (auto-claim rather than a separate offer/expiry
+/// window).
+model WaitlistEntry {
+  id                  String    @id @default(uuid())
+  bookingId           String    @unique
+  booking             Booking   @relation(fields: [bookingId], references: [id])
+  specialistId        String
+
+  preferredDayOfWeek  String?
+  preferredTimeOfDay  String?
+
+  /// waiting | claimed | expired
+  status              String    @default("waiting")
+  notifiedAt          DateTime?
+  claimedAt           DateTime?
+  expiredAt           DateTime?
+
+  createdAt           DateTime  @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([specialistId, status, createdAt])
+  @@map("waitlist_entry")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Every booking/waitlist/cancellation
+/// state change is a clinical/consent-relevant write, so it goes through
+/// this table in the same DB transaction as the domain write, then
+/// AuditOutboxRelayService (a @nestjs/schedule cron job) publishes it to the
+/// Audit Log Service.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

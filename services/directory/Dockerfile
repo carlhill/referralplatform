@@ -10,6 +10,10 @@ FROM node:20-alpine AS builder
 WORKDIR /workspace
 COPY . .
 RUN npm install --workspaces --include-workspace-root
+# This service's PrismaService needs the generated @prisma/client types (see
+# prisma/schema.prisma's DirectoryEntry/DirectorySyncRun/RoutingAttempt/AuditOutbox
+# models) before `tsc` can build it.
+RUN npm run prisma:generate -w services/directory
 RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/directory
 
 FROM node:20-alpine AS runtime

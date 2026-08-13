@@ -6,9 +6,11 @@
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// This service owns two bounded concerns stamped into one workspace (see
+// BUILD_LOG/directory.md for why they share a service rather than being
+// split): the Directory Service (specialist/GP directory, NHSD sync,
+// HealthPathways) and the Secure Messaging Gateway (routes referrals via
+// secure messaging vendors or direct delivery to onboarded specialists).
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +21,128 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// A specialist/GP directory entry — mirrors
+/// @referralplatform/shared-types' `DirectoryEntry` interface (see
+/// packages/shared-types/src/directory-entry.ts). Self-registered data
+/// always supersedes synced NHSD data for the same entity — enforced in
+/// DirectoryService, not at the schema level (see selfRegisteredOverride).
+model DirectoryEntry {
+  id       String  @id @default(uuid())
+  /// Opaque foreign reference to a Specialist entity this service does not
+  /// own (per root CONVENTIONS.md §6/§5, no cross-schema FK). Nullable
+  /// because a freshly NHSD-synced entry may not yet be linked to a
+  /// platform SpecialistId until the specialist actually registers/logs in.
+  specialistId String?
+  /// Healthcare Provider Identifier — Individual. The natural dedup key
+  /// across NHSD-synced and self-registered records for the same
+  /// practitioner (see upsert logic in nhsd-sync.service.ts).
+  hpiI         String? @unique
+
+  /// nhsd_sync | self_registered | healthpathways_suggested
+  source String
+
+  /// True once a specialist has self-registered — from that point on,
+  /// scheduled NHSD sync must never overwrite this entry's editable fields
+  /// (modules-and-requirements.md: "self-registered specialist data must
+  /// always win over synced NHSD data for the same entity").
+  selfRegisteredOverride Boolean @default(false)
+
+  displayName  String
+  subspecialty String
+  /// DirectoryPracticeLocation[] as JSON — see shared-types.
+  practiceLocations Json
+  /// e.g. ["Mon","Wed","Fri"].
+  consultingDays    String[]
+
+  econsultOptIn             Boolean @default(false)
+  acceptsBookingsViaPlatform Boolean @default(false)
+
+  /// Secure Messaging Gateway routing metadata for this entry — which vendor
+  /// endpoint (if any) delivers to this specialist, and whether they're
+  /// onboarded for direct platform delivery instead of secure messaging.
+  onboardedForDirectDelivery Boolean @default(false)
+  secureMessagingVendor      String? // 'healthlink' | 'medical_objects' | null
+  secureMessagingEndpointId  String? // vendor-specific mailbox/endpoint identifier
+
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([subspecialty])
+  @@index([source])
+  @@map("directory_entry")
+}
+
+/// Bookkeeping for scheduled NHSD sync job runs — idempotency/observability,
+/// not itself clinical/consent data (see BUILD_LOG/directory.md's audit
+/// scope judgment call).
+model DirectorySyncRun {
+  id                        String    @id @default(uuid())
+  source                    String    @default("nhsd_mock")
+  startedAt                 DateTime  @default(now())
+  completedAt               DateTime?
+  /// running | completed | failed
+  status                    String    @default("running")
+  recordsFetched            Int       @default(0)
+  recordsUpserted           Int       @default(0)
+  recordsSkippedSelfRegistered Int    @default(0)
+  errorMessage              String?
+
+  @@index([startedAt])
+  @@map("directory_sync_run")
+}
+
+/// A Secure Messaging Gateway routing decision/attempt for one referral.
+/// Every attempt is recorded — success or failure — so a delivery failure
+/// is a first-class, queryable/retryable record, never a silent drop, per
+/// modules-and-requirements.md: "must not silently fail a routed referral —
+/// a delivery failure must generate a dual-notification exception."
+model RoutingAttempt {
+  id         String  @id @default(uuid())
+  referralId String
+  /// The DirectoryEntry this referral was routed to, if resolved.
+  directoryEntryId String?
+
+  /// direct | secure_messaging
+  method String
+  /// healthlink | medical_objects | null (null when method='direct')
+  vendor String?
+
+  /// pending | delivered | failed
+  status String @default("pending")
+
+  attemptNumber Int    @default(1)
+  failureReason String?
+  /// The vendor/internal correlation id for a successful send, if any.
+  vendorMessageId String?
+
+  attemptedAt DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([referralId])
+  @@index([status])
+  @@map("routing_attempt")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Secure Messaging Gateway routing
+/// decisions are referral-lifecycle events (shared-types' AuditEventType
+/// already has 'referral.routed' for exactly this), so they go through this
+/// table in the same DB transaction as the RoutingAttempt write, then
+/// AuditOutboxRelayService (a @nestjs/schedule cron job) publishes it to the
+/// Audit Log Service. See BUILD_LOG/directory.md for the judgment call on
+/// why plain Directory Service writes (NHSD sync, self-registration) do NOT
+/// go through this table.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

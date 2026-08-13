@@ -6,9 +6,13 @@
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// This service owns two bounded concerns, per the task brief and
+// modules-and-requirements.md's module #5 (Referral Service) and #6
+// (Compliance Rules Engine) — built as two Nest modules inside this one
+// service/npm-workspace rather than a second top-level services/* entry,
+// since root CONVENTIONS.md's directory table (§1) only lists a single
+// `referral` service at port 3005 and this task's scope is that directory.
+// See BUILD_LOG/referral.md for the full rationale.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +23,193 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// A referral — module 2/5 of business-process-flow.md /
+/// modules-and-requirements.md. patientId/gpId/specialistId are opaque
+/// foreign references to entities owned by other services (Onboarding &
+/// Account, GP/Specialist portals) — per root CONVENTIONS.md §6, a service
+/// never reads another service's schema directly, so these are plain
+/// strings, not Prisma foreign keys.
+///
+/// `status` is the shared-types `ReferralStatus` union
+/// (packages/shared-types/src/referral.ts): queued | lapsed | routed |
+/// declined | booked | in_review | resolved_econsult | completed |
+/// cancelled. NOTE: that union has no distinct "created" value — this
+/// service treats referral creation as an instantaneous event (a
+/// `referral.created` audit entry) that lands the row directly in `queued`
+/// (see referral.service.ts's `create()` and BUILD_LOG/referral.md's
+/// judgment-call section for why, mirroring the precedent set in
+/// BUILD_LOG/gp-authorisation.md for a similar shared-type/task-brief
+/// mismatch).
+model Referral {
+  id                String    @id @default(uuid())
+  patientId         String
+  gpId              String
+  specialistId      String?
+
+  status            String    @default("queued")
+  origin            String    // gp_in_practice | gp_telehealth | patient_requested_urgent
+  /// Urgent fast-path flag — skips the Booking Service's preference
+  /// negotiation and offers the earliest available slot directly. Read
+  /// by the Booking Service, not acted on further within this service.
+  urgent            Boolean   @default(false)
+  reasonForReferral String
+
+  /// AI-assisted structured extraction output (module 6) — always
+  /// presented as a review-only summary alongside the original text, per
+  /// modules-and-requirements.md's Specialist Review Service requirement.
+  /// Populated by that service, not this one; nullable here.
+  aiStructuredSummary Json?
+
+  /// The treating GP's state at referral creation — keys the Compliance
+  /// Rules Engine's jurisdiction-specific rules (WWCC, child/DV/complex
+  /// checklist content), per minors-multigp-exception-paths.md section 3
+  /// ("keyed to the treating GP's state, not the patient's home address").
+  gpState           String
+
+  /// GP/AI-asserted inputs to the Compliance Rules Engine at creation time
+  /// — decision support only, never a legal certification (see
+  /// onboarding-processes.md). Persisted so a referral's compliance
+  /// evaluation is reproducible/auditable after the fact.
+  patientIsMinor    Boolean   @default(false)
+  dvIndicated       Boolean   @default(false)
+  complexCase       Boolean   @default(false)
+
+  /// Per-referral consent grants — shared-types' ReferralConsentGrant[]
+  /// (consent is settable per-referral, not just account-wide, per
+  /// modules-and-requirements.md's Consent & Security requirements).
+  consentGrants     Json      @default("[]")
+
+  /// Set when the referral entered the 2-day activation queue; cleared
+  /// (left populated for history) once routed or lapsed. Drives
+  /// ReferralQueueExpiryScheduler.
+  queueExpiresAt    DateTime?
+  lapsedAt          DateTime?
+
+  routedAt          DateTime?
+
+  declinedAt        DateTime?
+  declinedReason    String?
+
+  bookedAt          DateTime?
+
+  reviewStartedAt    DateTime?
+  resolvedEconsultAt DateTime?
+  completedAt        DateTime?
+
+  cancelledAt        DateTime?
+  cancelledReason     String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  complianceFlags   ComplianceFlag[]
+
+  @@index([patientId])
+  @@index([gpId])
+  @@index([status])
+  @@index([status, queueExpiresAt])
+  @@map("referral")
+}
+
+/// A compliance flag raised for a referral by the Compliance Rules Engine —
+/// mirrors packages/shared-types/src/compliance-flag.ts's `ComplianceFlag`
+/// almost exactly (that interface is the contract; this table is this
+/// service's storage of it).
+model ComplianceFlag {
+  id                      String    @id @default(uuid())
+  referralId              String
+  referral                Referral  @relation(fields: [referralId], references: [id])
+
+  /// child | domestic_violence | complex | working_with_children_check
+  category                String
+  /// AustralianState the rule was evaluated against (the treating GP's
+  /// state) — see Referral.gpState.
+  jurisdiction            String
+  /// The specific ComplianceRule.version that produced this flag — frozen
+  /// at creation so a referral stays auditable against the rules that
+  /// actually applied at the time, even if the ruleset is edited later
+  /// (modules-and-requirements.md's Compliance Rules Engine requirement).
+  rulesetVersion          String
+
+  checklistPresentedAt    DateTime  @default(now())
+  checklistAcknowledgedAt DateTime?
+  acknowledgementNote     String?
+
+  createdAt               DateTime  @default(now())
+
+  @@index([referralId])
+  @@map("compliance_flag")
+}
+
+/// The Compliance Rules Engine's data-driven rule store —
+/// modules-and-requirements.md module #6: "rules stored as versioned,
+/// editable configuration, not hardcoded conditionals". Seeded with real
+/// state-by-state WWCC data and the child/DV/complex trigger rules — see
+/// src/compliance-rules/compliance-rules.seed.ts.
+///
+/// A rule is never mutated in place once it has been used to produce a
+/// ComplianceFlag: editing a rule via the admin API closes the old row
+/// (`active: false`, `effectiveTo: now`) and inserts a new row with a
+/// bumped `version`, so already-created ComplianceFlags keep pointing at
+/// the exact rule text/config that applied when they were raised.
+model ComplianceRule {
+  id                       String    @id @default(uuid())
+
+  /// child | domestic_violence | complex | working_with_children_check
+  category                 String
+  /// An AustralianState, or "ALL" for a rule that applies nationally
+  /// regardless of the treating GP's state.
+  jurisdiction             String
+  /// Ruleset version tag for this specific rule row, e.g. "1.0.0". Stored
+  /// verbatim onto any ComplianceFlag this rule produces.
+  version                  String
+
+  /// Machine-readable key describing what referral-creation input this
+  /// rule reacts to: 'patient_is_minor' | 'dv_indicated' |
+  /// 'complex_case_flag'. See compliance-rules.service.ts `evaluate()`.
+  triggerCondition         String
+
+  /// Decision-support text shown to the GP alongside the checklist prompt
+  /// — never a legal certification (onboarding-processes.md).
+  checklistText            String
+
+  /// Only meaningful for category = 'working_with_children_check': does
+  /// this state require a WWCC from a GP, even though AHPRA-registered?
+  /// See minors-multigp-exception-paths.md section 1 for the real,
+  /// researched state-by-state answer this is seeded from.
+  requiresWwcc             Boolean   @default(false)
+  /// True for the four states where an AHPRA-registered practitioner is
+  /// exempt from the WWCC requirement.
+  exemptForAhpraRegistered Boolean   @default(false)
+
+  active                   Boolean   @default(true)
+  effectiveFrom            DateTime  @default(now())
+  effectiveTo              DateTime?
+
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@unique([category, jurisdiction, version])
+  @@index([category, jurisdiction, active])
+  @@map("compliance_rule")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Every referral state transition and
+/// every compliance-flag decision is a clinical/consent-relevant write, so
+/// it goes through this table in the same DB transaction as the domain
+/// write, then AuditOutboxRelayService (a @nestjs/schedule cron job)
+/// publishes it to the Audit Log Service.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

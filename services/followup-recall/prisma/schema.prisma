@@ -2,13 +2,17 @@
 //
 // Convention (see root CONVENTIONS.md, "Database access / ORM"): one shared
 // Postgres instance, one schema per service. This service's schema is
-// "followup_recall" — set via the `?schema=followup_recall` query param on DATABASE_URL
-// (see .env.example), not hardcoded here, so the same schema.prisma works in
-// every environment.
+// "followup_recall" — set via the `?schema=followup_recall` query param on
+// DATABASE_URL (see .env.example), not hardcoded here, so the same
+// schema.prisma works in every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// Module #7 of business-process-flow.md / the Follow-up & Recall Service of
+// modules-and-requirements.md: Follow-up Plan creation (next review date,
+// required tests, referral type), multi-channel reminder scheduling with
+// escalation, automatic test-completion detection (mock pathology e-result /
+// My Health Record) with self-report fallback, and IMMEDIATE reminder
+// suppression on a "patient deceased" event from the Consent & Security
+// service — including reminders already scheduled but not yet sent.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +23,150 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// The specialist's structured Follow-up Plan — mirrors
+/// packages/shared-types/src/followup-plan.ts's `FollowUpPlan` (that
+/// interface is the cross-service contract; this table is this service's
+/// storage of it). `referralId`/`patientId`/`gpId` are opaque foreign
+/// references to entities owned by other services (Referral, Onboarding &
+/// Account, GP Authorisation) — per root CONVENTIONS.md §6, a service never
+/// reads another service's schema directly, so these are plain strings, not
+/// Prisma foreign keys.
+model FollowUpPlan {
+  id        String @id @default(uuid())
+  referralId String
+  patientId  String
+  gpId       String
+
+  /// active | completed | suppressed_deceased | superseded_by_new_referral
+  /// — see src/follow-up-plans/follow-up-plan-status.ts.
+  status     String @default("active")
+
+  /// Free-text-but-validated category of what kind of follow-up this is —
+  /// see FOLLOW_UP_REFERRAL_TYPES in follow-up-plan-status.ts (e.g.
+  /// "specialist_review", "gp_managed_recall", "pathology_recheck",
+  /// "imaging_recheck"). Part of the Follow-up Plan per business-process-
+  /// flow.md module 6 ("next review date, required tests, referral type").
+  referralType String
+
+  nextReviewDueAt DateTime
+
+  /// Named tests/investigations this plan is waiting on (e.g. "HbA1c",
+  /// "chest X-ray"). Detection (automatic or self-reported) is tracked at
+  /// the whole-plan level, not per individual test — see
+  /// BUILD_LOG/followup-recall.md's judgment-call section for why (mirrors
+  /// the single "Test completed?" decision point in the business-process-
+  /// flow.md diagram, not a per-test sub-flow).
+  requiredTests String[] @default([])
+
+  /// Whether the referral this plan follows from is indefinite (ongoing) or
+  /// needs re-creation once this cycle completes.
+  indefiniteReferralApplies Boolean @default(false)
+
+  /// pathology_e_result | my_health_record | patient_self_report — set once
+  /// `status` transitions to "completed".
+  testCompletionDetectedVia String?
+  testCompletedAt           DateTime?
+
+  /// "GP notified to give a courtesy call ~1 month before due date" —
+  /// business-process-flow.md module 6.
+  gpCourtesyCallDueAt       DateTime?
+  gpCourtesyCallCompletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reminders Reminder[]
+
+  @@index([patientId])
+  @@index([status])
+  @@index([status, nextReviewDueAt])
+  @@map("follow_up_plan")
+}
+
+/// A single scheduled (or already-sent/suppressed/cancelled) multi-channel
+/// reminder belonging to a FollowUpPlan. `escalationLevel` 0 = the normal
+/// pre-due-date reminder cadence; 1+ = an escalating reminder generated
+/// because the due date passed with no test completion detected.
+model Reminder {
+  id             String       @id @default(uuid())
+  followUpPlanId String
+  followUpPlan   FollowUpPlan @relation(fields: [followUpPlanId], references: [id])
+
+  /// Denormalised onto the reminder row (not just reachable via the plan)
+  /// so the deceased-suppression sweep and the dispatch scheduler can both
+  /// query/index directly on patientId without a join.
+  patientId String
+
+  /// patient | carer | gp
+  recipientType String
+  /// sms | email | push | secure_message — see reminder-channel-sender.ts.
+  channel       String
+
+  scheduledFor DateTime
+  /// scheduled | sent | suppressed | cancelled | failed
+  status       String   @default("scheduled")
+  escalationLevel Int   @default(0)
+
+  sentAt           DateTime?
+  suppressedAt     DateTime?
+  suppressedReason String?
+  failureReason    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([followUpPlanId])
+  @@index([patientId])
+  @@index([status, scheduledFor])
+  @@map("reminder")
+}
+
+/// Local cache of the "patient is deceased, suppress everything" signal
+/// polled from the Consent & Security Service's `GET /events` feed — see
+/// src/deceased-suppression/deceased-event-poller.service.ts. Exists so
+/// every write path (new plan creation, new reminder scheduling) can check
+/// a fast local table rather than making an outbound HTTP call per write.
+model DeceasedSuppression {
+  id           String   @id @default(uuid())
+  patientId    String   @unique
+  active       Boolean  @default(true)
+  sourceFlagId String?
+  suppressedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("deceased_suppression")
+}
+
+/// Single-row cursor (`id` always "singleton") recording the last
+/// successfully-processed `occurredAt` from the Consent & Security
+/// Service's `GET /events?type=patient.deceased.frozen&since=...` feed, so
+/// the poller resumes correctly after a restart instead of re-processing
+/// (harmless but wasteful) or skipping (unsafe) events.
+model EventPollCursor {
+  id           String    @id @default("singleton")
+  lastPolledAt DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@map("event_poll_cursor")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Follow-up Plan creation/completion
+/// and reminder suppression-on-deceased are clinical/consent-relevant
+/// writes, so they go through this table in the same DB transaction as the
+/// domain write, then AuditOutboxRelayService (a @nestjs/schedule cron job)
+/// publishes each row to the Audit Log Service.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

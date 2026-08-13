@@ -7,6 +7,27 @@ functional/non-functional requirements, and root `CONVENTIONS.md` for the
 patterns every service follows (this service is stamped from that template —
 structure, scripts, and file layout are identical across all 12 services).
 
+See `BUILD_LOG/followup-recall.md` for the full build write-up (design
+decisions, what's mocked/interim, known gaps).
+
+## API
+
+All routes require a bearer token (`BearerAuthGuard`) unless noted.
+
+| Module | Method | Path | Notes |
+|---|---|---|---|
+| Follow-up Plans | `POST` | `/follow-up-plans` | Specialist (or staff on their behalf) only. Schedules the initial reminder cadence. |
+| | `GET` | `/follow-up-plans/:id` | |
+| | `GET` | `/follow-up-plans?patientId=&status=` | |
+| | `POST` | `/follow-up-plans/:id/self-report` | Patient/carer/GP fallback — `{ reportedBy, note? }`. |
+| | `POST` | `/follow-up-plans/:id/test-result` | System/staff only — automatic-detection hit, or a real pathology/MHR push integration's target. |
+| Health | `GET` | `/health` | Unauthenticated. |
+
+Nothing else is exposed over HTTP — reminder dispatch, escalation, automatic
+test-completion detection, and deceased-patient suppression are all internal
+`@nestjs/schedule` jobs (see `src/reminders`, `src/test-completion`,
+`src/deceased-suppression`), not endpoints.
+
 ## Run locally
 
 ```bash

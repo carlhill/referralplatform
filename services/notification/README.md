@@ -14,12 +14,38 @@ structure, scripts, and file layout are identical across all 12 services).
 npm install
 
 cp services/notification/.env.example services/notification/.env
-# then start the local infra this service needs (Postgres, Redis, Keycloak, ...):
-docker compose up -d postgres redis keycloak
+# then start the local infra this service needs (Postgres, Redis, Keycloak, Mailhog):
+docker compose up -d postgres redis keycloak mailhog
 
 npm run start:dev -w services/notification
 # -> http://localhost:3010/health
+# -> http://localhost:8025 to read real emails this service sends via Mailhog
 ```
+
+## API
+
+All routes below require `Authorization: Bearer <token>` (any authenticated
+principal — see `src/common/bearer-auth.guard.ts`).
+
+**Push/SMS/email fan-out** (`src/notifications`):
+
+- `POST /notifications/devices` — register a push device token
+- `POST /notifications/push` — send push to every active device for a recipient (MOCK provider)
+- `POST /notifications/sms` — send SMS (MOCK provider)
+- `POST /notifications/email` — send REAL email via SMTP (Mailhog locally)
+- `POST /notifications/dispatch` — push primary, `fallbackChannels: ['email','sms']` fallback if push has no device/fails
+- `GET /notifications?recipientId=...&channel=...&status=...` — query the delivery log
+- `GET /notifications/:id` — one delivery log row
+
+**Referral-scoped secure message thread** (`src/message-threads`):
+
+- `POST /referrals/:referralId/message-threads` — get-or-create the referral's thread
+- `GET /referrals/:referralId/message-threads` — 0 or 1 thread for this referral
+- `GET /message-threads/:id` — thread + participants + messages
+- `POST /message-threads/:id/messages` — post a message (push-notifies other participants)
+- `GET /message-threads/:id/messages` — list messages
+- `POST /message-threads/:id/participants` — add a known party (e.g. specialist joins)
+- `POST /message-threads/:id/resolve` — mark the exception resolved
 
 ## Build
 

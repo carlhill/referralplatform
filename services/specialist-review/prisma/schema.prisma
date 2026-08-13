@@ -2,13 +2,18 @@
 //
 // Convention (see root CONVENTIONS.md, "Database access / ORM"): one shared
 // Postgres instance, one schema per service. This service's schema is
-// "specialist_review" — set via the `?schema=specialist_review` query param on DATABASE_URL
-// (see .env.example), not hardcoded here, so the same schema.prisma works in
-// every environment.
+// "specialist_review" — set via the `?schema=specialist_review` query param on
+// DATABASE_URL (see .env.example), not hardcoded here, so the same
+// schema.prisma works in every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// Module #10/#5 (modules-and-requirements.md / business-process-flow.md
+// module 5 "Specialist review"): AI-assisted structured extraction of a
+// referral letter, presented as a review-only summary the specialist must
+// explicitly confirm; the eConsult-style async-advice branch vs. a full
+// telehealth/in-person appointment; and pre-visit pathology/imaging
+// requests. See BUILD_LOG/specialist-review.md for the full design
+// rationale, including why extraction output can never auto-action anything
+// (Babylon Health cautionary guardrails, patient-centered-recall-ai-intake.md).
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +24,199 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// This service's own copy of the referral packet needed for specialist
+/// review — pushed to it (POST /cases) by whichever upstream service hands
+/// the referral off for review once booked, rather than this service
+/// reading the Referral Service's schema directly (root CONVENTIONS.md §6:
+/// a service never reads another service's schema directly; cross-service
+/// data access goes through that service's API). `referralId` is an opaque
+/// foreign reference to services/referral's Referral.id.
+model ReferralCase {
+  id           String  @id @default(uuid())
+  referralId   String  @unique
+  patientId    String
+  gpId         String
+  specialistId String?
+
+  /// Urgent fast-path flag, carried over from the referral — informational
+  /// here (this service doesn't act on it beyond surfacing it to the
+  /// specialist); the Booking Service is what actually skips preference
+  /// negotiation for it.
+  urgent Boolean @default(false)
+
+  /// The raw referral letter / free-text content this service extracts
+  /// structured fields from. Source of truth for every ExtractionResult —
+  /// never mutated after case creation, so extraction is always
+  /// reproducible against the original text.
+  referralText String
+
+  /// Structured reason-for-referral field carried over from the Referral
+  /// Service, if supplied — used as an extraction hint but never a
+  /// substitute for parsing referralText itself.
+  reasonForReferralHint String?
+
+  /// received -> extracted -> extraction_confirmed -> (econsult_resolved |
+  /// full_appointment_branch) -> completed, with cancelled reachable from
+  /// any non-terminal state. See CaseStatus in src/cases/case-status.ts for
+  /// the authoritative transition table (data, not this comment).
+  status String @default("received")
+
+  receivedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  completedAt DateTime?
+  cancelledAt DateTime?
+  cancelledReason String?
+
+  extractions       ExtractionResult[]
+  decisions         SpecialistDecision[]
+  pathologyRequests PathologyImagingRequest[]
+
+  @@index([patientId])
+  @@index([specialistId])
+  @@index([status])
+  @@map("referral_case")
+}
+
+/// One run of an ExtractionProvider against a case's referralText — see
+/// src/extraction/extraction-provider.interface.ts. Always created in
+/// `pending_review` status; NEVER auto-actioned. Only becomes usable for
+/// anything downstream (branch decision, pathology request) once a
+/// specialist explicitly confirms it via `confirmedAt`/`confirmedBySpecialistId`
+/// — enforced in CasesService, not just a UI convention.
+model ExtractionResult {
+  id     String       @id @default(uuid())
+  caseId String
+  case   ReferralCase @relation(fields: [caseId], references: [id])
+
+  /// Which ExtractionProvider produced this — e.g. "rule-based-v1" or
+  /// "llm-v1" — so a case's extraction history stays auditable even after
+  /// the configured provider changes.
+  providerName String
+
+  /// The full ExtractionOutput (packages-shared-types-shaped, stored as
+  /// this service's own persistence format — see extraction-provider.interface.ts).
+  structuredData Json
+
+  /// Heuristic 0-1 confidence the provider itself reports — never used to
+  /// auto-decide anything, purely informational for the specialist.
+  confidence Float?
+
+  /// pending_review | confirmed | superseded (a later extraction run on the
+  /// same case was confirmed instead) | rejected (specialist explicitly
+  /// rejected this run as unusable, e.g. garbled OCR text).
+  status String @default("pending_review")
+
+  extractedAt DateTime @default(now())
+
+  confirmedAt             DateTime?
+  confirmedBySpecialistId String?
+  /// The specialist's corrections to structuredData, recorded SEPARATELY
+  /// from structuredData itself (which stays exactly what the provider
+  /// produced) — this is what lets the audit trail distinguish "what the AI
+  /// extracted" from "what the human actually confirmed was true", per the
+  /// Babylon Health guardrail of never letting AI output pass as a human
+  /// clinical judgement.
+  specialistEdits Json?
+
+  rejectedAt     DateTime?
+  rejectionReason String?
+
+  @@index([caseId])
+  @@map("extraction_result")
+}
+
+/// The specialist's explicit eConsult-vs-full-appointment branch decision —
+/// module 5's "S2: Resolvable via async advice (eConsult-style)?" fork.
+/// Can only be recorded once an ExtractionResult on the same case has been
+/// confirmed (enforced in CasesService).
+model SpecialistDecision {
+  id     String       @id @default(uuid())
+  caseId String
+  case   ReferralCase @relation(fields: [caseId], references: [id])
+
+  /// econsult | full_appointment
+  branch String
+
+  /// The specialist's async advice text — required when branch = econsult
+  /// (module 5's "S3: Specialist responds with advice — full appointment
+  /// avoided"), null for full_appointment.
+  adviceText String?
+  notes      String?
+
+  specialistId String
+  decidedAt    DateTime @default(now())
+
+  /// Best-effort sync of this decision back to the Referral Service's own
+  /// state machine (POST /referrals/:id/review/resolve-econsult, forwarding
+  /// the deciding specialist's own bearer token — see
+  /// src/common/referral-service.client.ts's doc comment for why a service
+  /// token can't be used here). pending | synced | failed. A failure here
+  /// never blocks or rolls back this service's own record of the decision —
+  /// this service's own data is authoritative for what happened during
+  /// review; the Referral Service's mirrored status is a courtesy sync.
+  referralServiceSyncStatus String  @default("pending")
+  referralServiceSyncError String?
+
+  @@index([caseId])
+  @@map("specialist_decision")
+}
+
+/// A pre-visit pathology/imaging request — module 5's "S5: Specialist may
+/// request pre-visit pathology/imaging via e-ordering". The actual
+/// e-ordering transmission is behind PathologyOrderingProvider (MOCK —
+/// replace with real integration, see src/extraction pattern's sibling in
+/// src/cases/pathology-ordering.provider.ts) since it requires a real
+/// secure-messaging-vendor account (HealthLink/Medical-Objects), same as
+/// the platform-wide Secure Messaging Gateway module.
+model PathologyImagingRequest {
+  id     String       @id @default(uuid())
+  caseId String
+  case   ReferralCase @relation(fields: [caseId], references: [id])
+
+  /// pathology | imaging
+  requestType String
+  /// Free-text test names as the specialist entered them, e.g. ["FBC", "LFTs", "CRP"].
+  testsRequested String[]
+  clinicalNotes  String?
+
+  /// requested (recorded here) -> sent (handed to the MOCK e-ordering
+  /// provider) -> resulted | cancelled. This service does not itself detect
+  /// results — that's Follow-up & Recall Service's job
+  /// (patient-centered-recall-ai-intake.md Layer 2); this table just proves
+  /// the request was made and gives it somewhere to eventually be marked
+  /// resulted for a human looking at case history.
+  status String @default("requested")
+
+  /// The MOCK e-ordering provider's fake reference id — see
+  /// pathology-ordering.provider.ts's doc comment. Never treat as a real
+  /// lab/HealthLink message id.
+  mockProviderReference String?
+
+  requestedBySpecialistId String
+  requestedAt             DateTime @default(now())
+
+  @@index([caseId])
+  @@map("pathology_imaging_request")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Every case-lifecycle write in this
+/// service (extraction confirmed/rejected, branch decision, pathology
+/// request, case completion/cancellation) is a clinical/consent-relevant
+/// write, so it goes through this table in the same DB transaction as the
+/// domain write, then AuditOutboxRelayService (a @nestjs/schedule cron job)
+/// publishes it to the Audit Log Service.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

@@ -1,16 +1,29 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { HealthModule } from './health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuditOutboxModule } from './audit-outbox/audit-outbox.module';
+import { ExtractionModule } from './extraction/extraction.module';
+import { CasesModule } from './cases/cases.module';
 
 /**
- * Specialist Review Service — AI-assisted structured extraction for specialists, eConsult-style async advice, pre-visit pathology/imaging requests.
+ * Specialist Review Service — AI-assisted structured extraction for
+ * specialists (pluggable ExtractionProvider), the eConsult-vs-full-
+ * appointment branch, and pre-visit pathology/imaging requests. See
+ * BUILD_LOG/specialist-review.md for the full design rationale.
  *
- * This module list grows as the service's real functionality is built —
- * see root CONVENTIONS.md for the module-per-domain-concept pattern
- * (e.g. a future PrismaModule, plus one module per bounded concern this
- * service owns). Keep AppModule itself thin: wiring only, no business logic.
+ * Kept thin: wiring only, no business logic — see CasesService for that.
  */
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }), HealthModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    ScheduleModule.forRoot(),
+    PrismaModule,
+    AuditOutboxModule,
+    ExtractionModule,
+    CasesModule,
+    HealthModule,
+  ],
 })
 export class AppModule {}

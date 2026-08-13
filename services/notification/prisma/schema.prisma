@@ -6,9 +6,11 @@
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// This service owns two bounded concerns, per modules-and-requirements.md
+// module #13 (Notification Service): (1) push/SMS/email fan-out and (2) the
+// referral-scoped secure message thread used to resolve exceptions
+// (minors-multigp-exception-paths.md, "How GP and patient actually resolve
+// an exception"). See BUILD_LOG/notification.md for the full rationale.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +21,175 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// A push-capable device registered by a patient/carer/GP/specialist's app —
+/// the mock push provider "sends" by looking up the recipient's active
+/// tokens and writing a NotificationLog row per token (see
+/// providers/push-provider.ts). Real push (FCM/APNs) would plug in here
+/// unchanged: this table is the same shape a real push provider needs
+/// (opaque platform token + platform).
+model PushDeviceToken {
+  id            String   @id @default(uuid())
+  principalType String   // ActorRef.principalType — patient | carer | gp | specialist | internal_staff | system
+  principalId   String
+  token         String   @unique
+  platform      String   // ios | android | web
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([principalType, principalId])
+  @@map("push_device_token")
+}
+
+/// One row per notification delivery attempt, across all three channels —
+/// "a queryable local table so other services/tests can assert on it" per
+/// the task brief. Deliberately a single unified table (not one per
+/// channel) so a `dispatch()` call's push-then-fallback story is visible as
+/// one linked set of rows (see `dispatchGroupId`).
+///
+/// NOT written to the audit log — routine notification delivery is
+/// high-volume and not clinical/consent-relevant in itself (root
+/// CONVENTIONS.md's audit-outbox requirement is about writes *to a clinical
+/// or consent-relevant record*, and the task brief explicitly carves this
+/// out: "not the routine notification delivery, which is high-volume and
+/// not audit-relevant"). The message-thread models below ARE audited.
+model NotificationLog {
+  id                String    @id @default(uuid())
+
+  channel           String    // push | sms | email
+  /// Free-text classification of what triggered this notification, e.g.
+  /// "referral.declined", "account.otp.issued", "referral.queue.expiring" —
+  /// not a foreign key into any other service's schema (root CONVENTIONS.md
+  /// §6: never read/write another service's schema directly).
+  eventType         String
+
+  recipientType     String    // ActorRef.principalType
+  recipientId       String
+  /// The literal address the message was sent to for this attempt — a
+  /// device token (push), an E.164 phone number (SMS, mock), or an email
+  /// address (email, real via Mailhog). Nullable because a `dispatch()`
+  /// push attempt with zero registered devices still logs a `skipped` row
+  /// with no address.
+  recipientAddress  String?
+
+  title             String?
+  body              String
+  /// Structured deep-link payload, e.g. { referralId, action: "message_thread" }
+  /// per minors-multigp-exception-paths.md's "deep-linking straight into
+  /// that referral's message thread" pattern.
+  data              Json?
+
+  provider          String    // mock-push | mock-sms | smtp-mailhog
+  status            String    // sent | failed | skipped
+  providerMessageId String?
+  error             String?
+
+  /// Groups every channel attempt made by one dispatch() call (push
+  /// primary, email/SMS fallback) so the fallback story is queryable as a
+  /// unit — root value is its own id when this row IS the group root.
+  dispatchGroupId   String?
+  /// 1 = the primary attempt, 2+ = a fallback attempt, in send order.
+  attemptSequence    Int       @default(1)
+
+  referralId        String?
+
+  createdAt         DateTime  @default(now())
+
+  @@index([recipientType, recipientId])
+  @@index([channel, status])
+  @@index([dispatchGroupId])
+  @@index([referralId])
+  @@map("notification_log")
+}
+
+/// A referral-scoped secure message thread — one per referral, created
+/// lazily on first use. See minors-multigp-exception-paths.md: "every
+/// referral gets its own secure, in-app conversation between the GP and
+/// patient (and specialist, once involved)... keeps a complete record of
+/// how an exception was resolved, feeding straight into the same signed
+/// audit log everything else does".
+model MessageThread {
+  id           String    @id @default(uuid())
+  /// One thread per referral — enforced with a unique constraint rather
+  /// than allowing several ad hoc threads per referral, matching the
+  /// design doc's singular "a referral-scoped message thread" (see
+  /// BUILD_LOG/notification.md's judgment-call section for the
+  /// alternative considered and rejected).
+  referralId   String    @unique
+  subject      String?
+  status       String    @default("open") // open | resolved
+
+  createdByType String
+  createdById   String
+
+  resolvedAt    DateTime?
+  resolvedByType String?
+  resolvedById   String?
+  resolutionNote String?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  participants MessageThreadParticipant[]
+  messages     MessageThreadMessage[]
+
+  @@map("message_thread")
+}
+
+/// The known parties to a referral's thread — GP, patient/carer, and
+/// (once involved) specialist. Not currently used to hard-block posting
+/// (see message-thread.service.ts's doc comment / BUILD_LOG for the
+/// documented access-control judgment call); it IS used to answer "who
+/// should be notified" when a message is posted.
+model MessageThreadParticipant {
+  id             String   @id @default(uuid())
+  threadId       String
+  thread         MessageThread @relation(fields: [threadId], references: [id])
+  principalType  String
+  principalId    String
+  displayName    String?
+  joinedAt       DateTime @default(now())
+
+  @@unique([threadId, principalType, principalId])
+  @@index([threadId])
+  @@map("message_thread_participant")
+}
+
+model MessageThreadMessage {
+  id             String   @id @default(uuid())
+  threadId       String
+  thread         MessageThread @relation(fields: [threadId], references: [id])
+
+  senderType     String
+  senderId       String
+  senderDisplayName String?
+
+  body           String
+
+  createdAt      DateTime @default(now())
+
+  @@index([threadId, createdAt])
+  @@map("message_thread_message")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Message-thread lifecycle events
+/// (thread created, message posted, thread resolved) are consent/exception
+/// relevant and go through this table in the same DB transaction as the
+/// domain write; routine push/SMS/email delivery (NotificationLog) does
+/// NOT, per the task brief.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

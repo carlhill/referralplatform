@@ -5,10 +5,6 @@
 // "gp_authorisation" — set via the `?schema=gp_authorisation` query param on DATABASE_URL
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
-//
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +15,72 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// Links a GP to a patient's account — module 1B of business-process-flow.md.
+/// patientId/gpId/practiceHpiO are opaque foreign references to entities
+/// this service does not own (Patient lives in onboarding-account, GP's own
+/// profile in the GP portal/Identity & Access) — per root CONVENTIONS.md §6,
+/// a service never reads another service's schema directly, so these are
+/// plain strings validated for shape only, not FK-joined.
+// Model named GpLink (not GPLink) deliberately — Prisma generates the client
+// property name by lowercasing only the model's first character, so
+// `GPLink` would produce the client property `gPLink`; `GpLink` produces the
+// much more natural `prisma.gpLink`. The domain-facing shared-types
+// interface (GPLink) keeps its own, unrelated naming.
+model GpLink {
+  id          String @id @default(uuid())
+  patientId   String
+  gpId        String
+  /// Healthcare Provider Identifier — Organisation of the requesting practice.
+  /// Format-validated (16 numeric digits) by the mock HPI-O/NASH guard — see
+  /// src/common/mock-nash-auth.ts.
+  practiceHpiO String
+
+  /// pending_patient_approval | approved | declined | revoked | expired
+  status String @default("pending_patient_approval")
+
+  approvalRequestedAt DateTime  @default(now())
+  /// Reuses the 2-day account-activation window, per
+  /// minors-multigp-exception-paths.md section 3.
+  approvalExpiresAt   DateTime
+  approvedAt          DateTime?
+  declinedAt          DateTime?
+  revokedAt           DateTime?
+
+  /// True if this link was created/auto-approved via the urgent-bypass
+  /// escalation path instead of standard patient push-approval — see
+  /// gp-links.service.ts's `requestLink()` and BUILD_LOG/gp-authorisation.md
+  /// for the judgment call on what "urgent bypass" means operationally.
+  urgentEscalation    Boolean @default(false)
+  urgentJustification String?
+
+  revokedByPrincipalId  String?
+  approvedByPrincipalId String?
+  declinedByPrincipalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([patientId, gpId])
+  @@index([status, approvalExpiresAt])
+  @@map("gp_link")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts. Every GPLink state transition is a
+/// consent-relevant write, so it goes through this table in the same DB
+/// transaction as the domain write, then AuditOutboxRelayService (a
+/// @nestjs/schedule cron job) publishes it to the Audit Log Service.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

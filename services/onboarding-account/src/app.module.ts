@@ -1,16 +1,46 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { HealthModule } from './health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuditOutboxModule } from './audit-outbox/audit-outbox.module';
+import { HiServiceModule } from './hi-service/hi-service.module';
+import { AhpraModule } from './ahpra/ahpra.module';
+import { NashModule } from './nash/nash.module';
+import { DirectoryClientModule } from './directory-client/directory-client.module';
+import { IdentityAccessClientModule } from './identity-access-client/identity-access-client.module';
+import { NotificationModule } from './notification/notification.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { GpPracticesModule } from './gp-practices/gp-practices.module';
+import { SpecialistsModule } from './specialists/specialists.module';
 
 /**
- * Onboarding & Account Service — SMS-link to DOB/Medicare verification to patient-vs-carer branch to OTP activation flow; owns the patient/carer/delegate account model.
+ * Onboarding & Account Service — the SMS-link-in-production/email-link-in-
+ * this-build → DOB/Medicare verification → patient-vs-carer branch → OTP
+ * activation flow; owns the patient/carer/delegate account model, plus GP
+ * practice and specialist onboarding. See BUILD_LOG/onboarding-account.md
+ * for what's real vs. mocked, and each feature module's own doc comments.
  *
- * This module list grows as the service's real functionality is built —
- * see root CONVENTIONS.md for the module-per-domain-concept pattern
- * (e.g. a future PrismaModule, plus one module per bounded concern this
- * service owns). Keep AppModule itself thin: wiring only, no business logic.
+ * `ScheduleModule.forRoot()` powers `AuditOutboxModule`'s relay job (the
+ * outbox-pattern half of "every clinical/consent-relevant write produces a
+ * signed audit entry" — see root CONVENTIONS.md §7).
  */
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }), HealthModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    ScheduleModule.forRoot(),
+    HealthModule,
+    PrismaModule,
+    AuditOutboxModule,
+    HiServiceModule,
+    AhpraModule,
+    NashModule,
+    DirectoryClientModule,
+    IdentityAccessClientModule,
+    NotificationModule,
+    OnboardingModule,
+    GpPracticesModule,
+    SpecialistsModule,
+  ],
 })
 export class AppModule {}

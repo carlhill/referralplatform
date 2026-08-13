@@ -7,6 +7,25 @@ functional/non-functional requirements, and root `CONVENTIONS.md` for the
 patterns every service follows (this service is stamped from that template —
 structure, scripts, and file layout are identical across all 12 services).
 
+See `BUILD_LOG/gp-authorisation.md` for the full build write-up (design
+decisions, what's mocked, known gaps).
+
+## API
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/gp-links` | `HpioNashAuthGuard` (MOCK HPI-O/NASH — see `src/common/mock-nash-auth.ts`) | A practice system requests a link between a GP and an existing patient account. Auto-approves immediately if `urgentEscalation: true` (with a required `urgentJustification`). |
+| `GET` | `/gp-links?patientId=\|gpId=&status=` | Bearer | List GP links for a patient (consent-page "linked GPs" list) or for a GP. |
+| `GET` | `/gp-links/authorisation?patientId=&gpId=` | Bearer | **The enforcement point.** Returns `{ authorised, status, linkId? }` — the Referral Service calls this before creating a referral for a GP not already known to be linked. |
+| `GET` | `/gp-links/:id` | Bearer | Fetch one link. |
+| `POST` | `/gp-links/:id/approve` | Bearer + step-up (`STEP_UP_ACR`) | Patient/carer approves a pending link. |
+| `POST` | `/gp-links/:id/decline` | Bearer | Patient/carer declines a pending link. |
+| `POST` | `/gp-links/:id/revoke` | Bearer | Patient/carer revokes a currently-approved link — the consent page's "revoke" control. |
+
+A background sweep (`GpLinkExpiryScheduler`, every 5 minutes) and a lazy
+check on every read both expire a pending link once its 2-day approval
+window passes with no patient response.
+
 ## Run locally
 
 ```bash

@@ -2,13 +2,9 @@
 //
 // Convention (see root CONVENTIONS.md, "Database access / ORM"): one shared
 // Postgres instance, one schema per service. This service's schema is
-// "consent_security" — set via the `?schema=consent_security` query param on DATABASE_URL
-// (see .env.example), not hardcoded here, so the same schema.prisma works in
-// every environment.
-//
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// "consent_security" — set via the `?schema=consent_security` query param on
+// DATABASE_URL (see .env.example), not hardcoded here, so the same
+// schema.prisma works in every environment.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +15,180 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// The consent page's living audit trail — mirrors
+/// packages/shared-types/src/consent-record.ts's ConsentRecord interface.
+/// See BUILD_LOG/consent-security.md for the `referral_visibility` subjectId
+/// convention (`"<referralId>:<granteeId>"`) this service uses to make
+/// per-referral (not just account-wide) visibility concrete.
+model ConsentRecord {
+  id          String  @id @default(uuid())
+  patientId   String
+  /// gp_link | carer_delegate | sensitive_category_access | referral_visibility
+  subjectType String
+  subjectId   String
+  /// sexual_health | mental_health | reproductive_health | drug_and_alcohol
+  sensitiveCategory String?
+
+  grantedAt            DateTime  @default(now())
+  grantedByPrincipalId String
+  revokedAt            DateTime?
+  revokedByPrincipalId String?
+
+  reattestedAt           DateTime?
+  nextReattestationDueAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, subjectType])
+  @@index([patientId, subjectType, subjectId])
+  @@map("consent_record")
+}
+
+/// Periodic carer/delegate re-attestation scheduling — Carer records
+/// themselves live in the Onboarding & Account Service (out of this
+/// service's schema per root CONVENTIONS.md §6); this table tracks *when a
+/// re-attestation is next due* for a given (opaque) carerId/patientId pair,
+/// which is this service's actual scope per
+/// claude/modules-and-requirements.md ("periodic carer/delegate
+/// re-attestation").
+model ReattestationSchedule {
+  id          String @id @default(uuid())
+  carerId     String
+  patientId   String
+  relationship String
+
+  cadenceDays      Int       @default(365)
+  lastReattestedAt DateTime?
+  nextDueAt        DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([carerId, patientId])
+  @@index([nextDueAt])
+  @@map("reattestation_schedule")
+}
+
+/// "Raise a concern" triage outcome — mirrors
+/// packages/shared-types/src/concern.ts's Concern interface.
+model Concern {
+  id                 String  @id @default(uuid())
+  patientId          String
+  relatedReferralId  String?
+  /// clinical_care_or_conduct | platform_technical | privacy_or_consent_breach
+  category           String
+  /// ahpra_or_state_health_complaints_commissioner | internal_platform_support | privacy_officer
+  routedTo           String
+  /// triaged | routed | in_progress | resolved | escalated_to_oaic
+  status             String  @default("routed")
+  summary            String
+  gpNotifiedId       String?
+
+  raisedAt       DateTime  @default(now())
+  resolvedAt     DateTime?
+  resolutionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([status])
+  @@map("concern")
+}
+
+/// A GP-triggered deceased-patient flag — complaints-continuity-deceased.md
+/// section 3. Freezes the account (enforced by other services subscribing to
+/// PublishedEvent, since account state itself lives in Onboarding & Account
+/// — see BUILD_LOG/consent-security.md for the integration contract).
+model DeceasedFlag {
+  id              String   @id @default(uuid())
+  patientId       String   @unique
+  flaggedAt       DateTime @default(now())
+  flaggedByGpId   String
+  /// Keys the state-variable executor/family/coroner access rule — see
+  /// complaints-continuity-deceased.md section 3.
+  state           String
+  reason          String?
+  freezeConfirmedAt DateTime @default(now())
+  active          Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accessRequests AccessRequest[]
+
+  @@map("deceased_flag")
+}
+
+/// The human-reviewed post-death access-request queue —
+/// executor/administrator/immediate-family/coroner, state-keyed, per
+/// complaints-continuity-deceased.md section 3 point 3. Never auto-approved;
+/// `eligibleByDefaultStateRule` (computed, not stored) is decision support
+/// only for the reviewing staff member.
+model AccessRequest {
+  id                 String   @id @default(uuid())
+  deceasedFlagId     String
+  patientId          String
+  requesterName      String
+  requesterEmail     String?
+  requesterPhone     String?
+  /// executor | administrator | immediate_family | coroner | other
+  requesterRelationship String
+  state              String
+  evidenceDescription String?
+  evidenceDocumentId  String?
+
+  /// pending | approved | denied
+  status             String   @default("pending")
+  reviewedByStaffId  String?
+  reviewedAt         DateTime?
+  decisionNote       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deceasedFlag DeceasedFlag @relation(fields: [deceasedFlagId], references: [id])
+
+  @@index([patientId])
+  @@index([status])
+  @@map("access_request")
+}
+
+/// Interim, polling-based publish mechanism for cross-service events this
+/// service raises that other services need to react to (reminder/queue
+/// suppression on a deceased-patient freeze, in particular) — root
+/// CONVENTIONS.md §6 names SQS/SNS as the intended real transport but notes
+/// it is "not yet wired into this scaffold." Other services poll
+/// `GET /events?type=&since=` rather than this service calling their APIs
+/// directly, so consent-security doesn't need to know who's listening — see
+/// BUILD_LOG/consent-security.md for the documented judgment call and the
+/// concrete follow-up (swap for a real queue without changing what gets
+/// published).
+model PublishedEvent {
+  id         String   @id @default(uuid())
+  type       String
+  patientId  String
+  payload    Json
+  occurredAt DateTime @default(now())
+
+  @@index([type, occurredAt])
+  @@index([patientId])
+  @@map("published_event")
+}
+
+/// Outbox pattern for audit writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

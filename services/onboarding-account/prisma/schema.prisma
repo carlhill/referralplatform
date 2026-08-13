@@ -19,9 +19,274 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// This service's own copy of the patient account record — see root
+/// CONVENTIONS.md §4: shapes must match `@referralplatform/shared-types`'
+/// `Patient` interface field-for-field (that package is the source of truth
+/// for cross-service contracts; Prisma can't share a model definition across
+/// service schemas, so this is intentionally kept in lockstep by hand).
+/// Deliberately loose typing (`String` status/category fields, not a Prisma
+/// enum) so this schema can evolve without a migration every time
+/// shared-types adds a new enum member.
+model Patient {
+  id        String   @id @default(uuid())
+  /// Primary de-duplication key — resolved via the (mocked) Healthcare
+  /// Identifiers Service, see src/hi-service. Never Medicare number or
+  /// name/DOB alone — see identity-security-recommendations.md.
+  ihi       String?  @unique
+  givenName String
+  familyName String
+  dateOfBirth DateTime @db.Date
+  /// The mobile number the referring GP has on file. In production this is
+  /// where the account-activation SMS goes; in this build the actual
+  /// delivery channel is email (see AccountActivationRequest.linkEmail) —
+  /// see BUILD_LOG/onboarding-account.md for why this substitution is safe.
+  mobileNumber String
+  email        String?
+  medicareNumber String?
+  isMinor      Boolean  @default(false)
+  guardianCarerId String?
+  /// pending_activation | active | frozen_deceased | suspended
+  status       String   @default("pending_activation")
+  /// SensitiveCategory[] — JSON array of strings, see shared-types/patient.ts.
+  sensitiveCategoriesHiddenFromDelegates Json @default("[]")
+  deceasedFlaggedAt      DateTime?
+  deceasedFlaggedByGpId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activationRequests AccountActivationRequest[]
+  carers             Carer[]
+
+  @@index([mobileNumber])
+  @@index([email])
+  @@index([status])
+  @@map("patients")
+}
+
+/// One row per GP-triggered "create/activate this patient's account" request
+/// — the SMS-link-in-production / email-link-in-this-build → DOB/Medicare
+/// verification → carer-vs-patient branch → OTP flow all hang off this
+/// record. See identity-security-recommendations.md §3 and
+/// modules-and-requirements.md ("Onboarding & Account").
+model AccountActivationRequest {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  /// The GP who triggered this request — must belong to a GpPractice with
+  /// verificationStatus = 'verified' and an acknowledged compliance
+  /// checklist (enforced in onboarding.service.ts), closing the "fake GP
+  /// practice" fraud surface per onboarding-processes.md.
+  triggeringGpId   String
+  triggeringGpHpiO String
+
+  /// SHA-256 hash of the single-use activation token — the raw token is
+  /// never stored, only ever emailed once and re-derived/compared on lookup.
+  tokenHash String @unique
+
+  /// The shared secret the GP already holds (captured at referral time),
+  /// used to bind whoever clicks the link to the actual patient record —
+  /// see identity-security-recommendations.md §3 steps 1 & 3. Never
+  /// returned in any API response.
+  dobSnapshot      DateTime @db.Date
+  medicareSnapshot String?
+
+  /// pending -> identity_verified -> branch_selected -> activated
+  /// (or -> expired / -> locked at any point before activated)
+  status String @default("pending")
+
+  /// 'patient' | 'carer' — set once the branch question is answered.
+  role String?
+
+  /// Always 'email' in this build — see modules-and-requirements.md
+  /// ("OTP delivery channel is pluggable ... for this build ... email").
+  otpDeliveryChannel String @default("email")
+
+  identityVerifyAttempts Int       @default(0)
+  identityLockedUntil    DateTime?
+  identityVerifiedAt     DateTime?
+
+  linkEmail     String
+  linkSentAt    DateTime  @default(now())
+  linkExpiresAt DateTime
+  /// The referral queued behind this activation lapses if not completed by
+  /// this time — the "2 days then delete" window from the project brief.
+  queueExpiresAt DateTime
+
+  activatedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  otpChallenges OtpChallenge[]
+  carer         Carer?
+
+  @@index([patientId])
+  @@index([status])
+  @@index([triggeringGpId])
+  @@map("account_activation_requests")
+}
+
+/// A carer/delegate account — see identity-security-recommendations.md §3.
+/// Mirrors shared-types' `Carer` interface.
+model Carer {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  activationRequestId String?                    @unique
+  activationRequest   AccountActivationRequest? @relation(fields: [activationRequestId], references: [id])
+
+  givenName  String
+  familyName String
+  email      String
+  emailVerifiedAt DateTime?
+
+  /// parent_guardian | adult_child | spouse_partner | professional_support_worker | other
+  relationship String
+  /// nominated_delegate | authorised_representative
+  tier String @default("nominated_delegate")
+
+  sharesPatientMobileNumber Boolean
+  ownMobileNumber           String?
+
+  authorisedRepresentativeEvidenceDocumentId String?
+  sensitiveCategoryAccessGrantedAt           DateTime?
+
+  lastReattestedAt       DateTime?
+  nextReattestationDueAt DateTime
+
+  /// Flags this carer for the organisational-carer review flow when the same
+  /// email/mobile repeatedly appears as carer across unrelated patients —
+  /// see identity-security-recommendations.md §5.
+  suspectedOrganisationalCarer Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([patientId])
+  @@index([email])
+  @@index([ownMobileNumber])
+  @@map("carers")
+}
+
+/// A 6-digit OTP challenge, delivered by email via Mailhog/nodemailer (see
+/// src/notification/email-otp.service.ts). One AccountActivationRequest can
+/// have several (resend, or patient-then-carer-branch reissue) but only the
+/// most recent unconsumed one is valid.
+model OtpChallenge {
+  id                  String                    @id @default(uuid())
+  activationRequestId String
+  activationRequest   AccountActivationRequest @relation(fields: [activationRequestId], references: [id])
+
+  /// 'patient' | 'carer' — who this OTP activates.
+  targetType String
+  /// The Patient.id or Carer.id being activated/verified.
+  targetId   String
+  /// 'account_activation' | 'carer_email_verification' — see
+  /// onboarding.service.ts for why this build sends one combined OTP email
+  /// rather than two separate carer verification steps.
+  purpose      String
+  emailAddress String
+
+  /// HMAC-SHA256(code, OTP_HASH_SECRET) — the raw 6-digit code is never
+  /// persisted, only ever emailed once.
+  codeHash String
+
+  attemptCount Int       @default(0)
+  maxAttempts  Int       @default(5)
+  lockedUntil  DateTime?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([activationRequestId])
+  @@index([expiresAt])
+  @@map("otp_challenges")
+}
+
+/// GP practice onboarding — see onboarding-processes.md ("Onboarding process
+/// — GP practice"). Practice-level registration verified against HPI-O, not
+/// individual GP self-signup.
+model GpPractice {
+  id           String @id @default(uuid())
+  practiceName String
+  hpiO         String @unique
+  contactEmail String
+  /// AustralianState — keys the compliance-checklist content and WWCC rule.
+  state String
+
+  /// pending | verified | failed — see src/hi-service (MOCK HI Service lookup).
+  verificationStatus String @default("pending")
+
+  /// A | B | C — see onboarding-processes.md step 2.
+  integrationTier String @default("A")
+
+  complianceChecklistAcknowledgedAt      DateTime?
+  complianceChecklistAcknowledgedByName  String?
+  complianceChecklistAcknowledgedByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([verificationStatus])
+  @@map("gp_practices")
+}
+
+/// Specialist onboarding — see onboarding-processes.md ("Onboarding process —
+/// Specialist").
+model Specialist {
+  id         String @id @default(uuid())
+  givenName  String
+  familyName String
+  contactEmail String
+
+  ahpraNumber             String @unique
+  /// pending | verified | failed — MOCK AHPRA public-register lookup.
+  ahpraVerificationStatus String @default("pending")
+  specialty               String?
+  registrationStatus      String?
+
+  /// MOCK Healthcare Identifiers Service HPI-I resolution.
+  hpiI                 String? @unique
+  hpiIResolutionStatus String  @default("pending")
+
+  /// MOCK NASH credential provisioning.
+  nashCredentialId     String?
+  nashCredentialStatus String  @default("pending")
+
+  /// Directory Service profile creation — real HTTP call to the Directory
+  /// Service with a graceful "pending_directory_service" fallback if that
+  /// service/endpoint isn't reachable yet. See src/directory-client.
+  directoryProfileId     String?
+  directoryProfileStatus String  @default("pending")
+
+  econsultOptIn   Boolean   @default(false)
+  econsultOptInAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ahpraVerificationStatus])
+  @@map("specialists")
+}
+
+/// Outbox pattern for audit-log writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts's suggested shape. Written in the
+/// same DB transaction as the domain row it documents; relayed to the real
+/// Audit Log Service by AuditOutboxRelayService (src/audit-outbox), a
+/// @nestjs/schedule interval job, which marks each row published once the
+/// signed write succeeds.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

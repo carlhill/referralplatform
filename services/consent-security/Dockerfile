@@ -10,6 +10,11 @@ FROM node:20-alpine AS builder
 WORKDIR /workspace
 COPY . .
 RUN npm install --workspaces --include-workspace-root
+# This service's PrismaService needs the generated @prisma/client types (see
+# prisma/schema.prisma's ConsentRecord/ReattestationSchedule/Concern/
+# DeceasedFlag/AccessRequest/PublishedEvent/AuditOutbox models) before `tsc`
+# can build it.
+RUN npm run prisma:generate -w services/consent-security
 RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/consent-security
 
 FROM node:20-alpine AS runtime

@@ -1,0 +1,123 @@
+name: CI
+
+# Lints, builds, and tests every workspace on push. See root CONVENTIONS.md
+# ("Testing convention") for what "every workspace" covers, and
+# services/fhir-gateway/README.md for why that one service has its own job.
+#
+# This workflow has not been run against a live GitHub repository yet (this
+# monorepo is still in its scaffolding phase) but is a real, complete workflow —
+# not a placeholder — and should run as-is once pushed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Every TypeScript workspace: services/* (except the Java one), apps/*, packages/*.
+  # One npm install at the root (npm workspaces hoist everything into one
+  # node_modules tree) rather than one install per workspace — see root
+  # CONVENTIONS.md, "How to run this locally".
+  # ---------------------------------------------------------------------------
+  node-workspaces:
+    name: Node workspaces (lint / typecheck / build / test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (root workspace install)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --workspaces --if-present
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Build packages (dependency order — shared-types/ui-components first)
+        run: |
+          npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w packages/ui-components
+          npm run build --workspaces --if-present
+
+      - name: Test
+        run: npm run test --workspaces --if-present
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Dependency vulnerability scan (npm audit)
+        # Required gate per claude/solution-architecture-tech-stack.md ("CI/CD"):
+        # dependency vulnerability scanning on every build. `continue-on-error`
+        # is deliberate at this early scaffolding stage — see the comment below —
+        # remove it once the team has triaged the current baseline of advisories.
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # The one Java/Maven module — see claude/solution-architecture-tech-stack.md,
+  # "Exception — the FHIR/interoperability layer is Java".
+  # ---------------------------------------------------------------------------
+  fhir-gateway:
+    name: fhir-gateway (Maven)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/fhir-gateway
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and test
+        run: mvn -B clean verify
+
+  # ---------------------------------------------------------------------------
+  # CodeQL — static analysis gate, per claude/solution-architecture-tech-stack.md
+  # ("Required gates before any deploy... SAST").
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      matrix:
+        language: ['javascript-typescript', 'java-kotlin']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3

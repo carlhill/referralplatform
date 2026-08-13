@@ -1,0 +1,22 @@
+{
+  "name": "@referralplatform/shared-types",
+  "version": "0.1.0",
+  "description": "Shared TypeScript domain types for ReferralPlatform. Single source of truth for core domain objects across every service and app — see root CONVENTIONS.md.",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "test": "echo \"(shared-types) no runtime logic to test yet\" && exit 0",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

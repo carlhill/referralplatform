@@ -1,0 +1,33 @@
+{
+  "name": "@referralplatform/patient-web",
+  "version": "0.1.0",
+  "description": "Next.js companion web app for the patient/carer's bigger-screen use cases (document history, linked-GP management). The primary patient/carer surface is the Expo mobile app in apps/patient-mobile.",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3102",
+    "build": "next build",
+    "start": "next start -p 3102",
+    "lint": "eslint app --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@referralplatform/shared-types": "*",
+    "@referralplatform/ui-components": "*",
+    "next": "^16.3.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.16.11",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "ts-jest": "^29.4.12",
+    "typescript": "^5.6.3"
+  }
+}

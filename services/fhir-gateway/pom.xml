@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Integration & FHIR Gateway — the one deliberately polyglot service in the
+  platform (Java, not TypeScript/NestJS like every other service). See
+  claude/solution-architecture-tech-stack.md, "Exception — the FHIR/interoperability
+  layer is Java, using HAPI FHIR" for why: HAPI FHIR is the mature, AU
+  Core-aware, de facto open-source FHIR toolkit that most real Australian
+  health-data integrations are built on — reimplementing FHIR validation, MHR
+  conformance, and IHI/HPI-O/HPI-I lookups in Node would mean re-solving
+  problems this library has already solved.
+
+  This service handles: My Health Record conformance, Healthcare Identifiers
+  Service lookups (IHI/HPI-O/HPI-I), NASH signing operations, and the
+  structured FHIR export capability (business continuity requirement) — see
+  claude/modules-and-requirements.md, service #14.
+
+  NOTE FOR BUILDERS: this pom.xml could not be built/verified inside the
+  scaffolding sandbox this skeleton was generated in (Maven Central was not
+  reachable from that sandbox's network policy) — verify `mvn clean verify`
+  succeeds in a normal dev/CI environment before relying on it.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>au.com.referralplatform</groupId>
+  <artifactId>fhir-gateway</artifactId>
+  <version>0.1.0</version>
+  <name>fhir-gateway</name>
+  <description>Integration &amp; FHIR Gateway — HAPI FHIR-based service for MHR conformance, Healthcare Identifiers Service lookups, NASH signing, and structured FHIR export.</description>
+  <packaging>jar</packaging>
+
+  <properties>
+    <java.version>21</java.version>
+    <hapi.fhir.version>7.4.0</hapi.fhir.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- HAPI FHIR — AU Core-aware FHIR resource parsing/validation. R4 structures,
+         since AU Core (and My Health Record's current conformance target) is FHIR R4. -->
+    <dependency>
+      <groupId>ca.uhn.hapi.fhir</groupId>
+      <artifactId>hapi-fhir-base</artifactId>
+      <version>${hapi.fhir.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ca.uhn.hapi.fhir</groupId>
+      <artifactId>hapi-fhir-structures-r4</artifactId>
+      <version>${hapi.fhir.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ca.uhn.hapi.fhir</groupId>
+      <artifactId>hapi-fhir-validation</artifactId>
+      <version>${hapi.fhir.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>fhir-gateway</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,27 @@
+server:
+  port: 3013
+
+spring:
+  application:
+    name: fhir-gateway
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# Healthcare Identifiers Service / NASH / My Health Record endpoints are
+# environment-specific and credentialed — see .env.example and root
+# CONVENTIONS.md ("Environment variable conventions"). Spring reads these via
+# standard SCREAMING_SNAKE_CASE -> kebab-case env var binding.
+referralplatform:
+  hi-service:
+    base-url: ${HI_SERVICE_BASE_URL:https://hi-service.example.gov.au}
+  nash:
+    signing-key-path: ${NASH_SIGNING_KEY_PATH:./local-dev-only-nash-key.pem}
+  mhr:
+    base-url: ${MHR_BASE_URL:https://mhr.example.gov.au}

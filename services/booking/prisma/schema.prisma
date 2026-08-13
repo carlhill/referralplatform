@@ -1,0 +1,27 @@
+// Prisma schema for the booking service.
+//
+// Convention (see root CONVENTIONS.md, "Database access / ORM"): one shared
+// Postgres instance, one schema per service. This service's schema is
+// "booking" — set via the `?schema=booking` query param on DATABASE_URL
+// (see .env.example), not hardcoded here, so the same schema.prisma works in
+// every environment.
+//
+// First model in this service? Run:
+//   npx prisma migrate dev --name init
+// which creates prisma/migrations/ (commit it) and generates the client.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Add your models below, e.g.:
+//
+// model Placeholder {
+//   id        String   @id @default(uuid())
+//   createdAt DateTime @default(now())
+// }

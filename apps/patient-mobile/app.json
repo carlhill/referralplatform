@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "ReferralPlatform",
+    "slug": "referralplatform-patient-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.referralplatform.patientmobile"
+    },
+    "android": {
+      "package": "com.referralplatform.patientmobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:3002"
+    }
+  }
+}

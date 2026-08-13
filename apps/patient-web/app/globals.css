@@ -1,0 +1,7 @@
+body {
+  margin: 0;
+  font-family: var(--rp-font-family, system-ui, sans-serif);
+  font-size: var(--rp-font-size-body, 17px);
+  color: var(--rp-color-text, #172023);
+  background: var(--rp-color-bg-subtle, #f7f9fa);
+}

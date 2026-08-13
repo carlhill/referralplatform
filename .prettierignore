@@ -1,0 +1,12 @@
+dist
+build
+.next
+coverage
+node_modules
+*.tsbuildinfo
+services/fhir-gateway
+apps/patient-mobile/assets
+BUILD_LOG
+infra/keycloak/realm-export.json
+package-lock.json
+next-env.d.ts

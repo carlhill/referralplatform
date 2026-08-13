@@ -1,0 +1,418 @@
+# ReferralPlatform — local development stack.
+#
+# See root CONVENTIONS.md ("How services call each other", "Environment variable
+# conventions") and README.md ("How to run this locally") before changing this file.
+#
+# Database convention: ONE shared PostgreSQL instance, ONE schema per service
+# (see CONVENTIONS.md, "Database access / ORM" for why — not one database per
+# microservice). Each service's DATABASE_URL below points at the same `postgres`
+# container with a distinct `?schema=` query param.
+#
+# Port map (host:container) — every port a human needs to hit from outside Docker:
+#   5432  postgres            (psql / GUI client)
+#   6379  redis
+#   3322  immudb (gRPC)       9497  immudb (metrics)
+#   8180  keycloak admin/OIDC (mapped off 8080 to avoid clashing with immudb tooling)
+#   1025  mailhog (SMTP)      8025  mailhog (web UI — view OTP/account-activation emails here)
+#   3001  identity-access     3002  onboarding-account   3003  gp-authorisation
+#   3004  consent-security    3005  referral             3006  directory
+#   3007  booking             3008  specialist-review    3009  followup-recall
+#   3010  notification        3011  admin-console         3012  audit-log
+#   3013  fhir-gateway (Java/Spring Boot — see services/fhir-gateway/README.md)
+#   3100  gp-portal           3101  specialist-portal    3102  patient-web
+#   8081  patient-mobile (Metro bundler — see apps/patient-mobile/README.md)
+#
+# Every Node service Dockerfile expects the MONOREPO ROOT as its build context
+# (it needs packages/shared-types, packages/audit-client, packages/auth-client) —
+# see each service's Dockerfile. fhir-gateway is the one exception: its own
+# directory is a self-contained Maven module.
+
+x-node-service-env: &node-service-env
+  NODE_ENV: development
+  REDIS_URL: redis://redis:6379
+  KEYCLOAK_ISSUER: http://keycloak:8080/realms/referralplatform
+  AUDIT_LOG_SERVICE_URL: http://audit-log:3012
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
+
+services:
+  # ---------------------------------------------------------------------------
+  # Shared infrastructure
+  # ---------------------------------------------------------------------------
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: referralplatform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: referralplatform
+      POSTGRES_PASSWORD: referralplatform
+      POSTGRES_DB: referralplatform
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ['CMD-SHELL', 'pg_isready -U referralplatform']
+
+  redis:
+    image: redis:7-alpine
+    container_name: referralplatform-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ['CMD', 'redis-cli', 'ping']
+
+  immudb:
+    image: codenotary/immudb:1.9.5
+    container_name: referralplatform-immudb
+    restart: unless-stopped
+    environment:
+      IMMUDB_ADMIN_PASSWORD: change-me-in-local-env
+    ports:
+      - '3322:3322' # gRPC — the Audit Log Service connects here (see services/audit-log/.env.example)
+      - '9497:9497' # Prometheus metrics
+    volumes:
+      - immudb-data:/var/lib/immudb
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ['CMD', 'nc', '-z', 'localhost', '3322']
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: referralplatform-keycloak
+    command: ['start-dev', '--import-realm']
+    restart: unless-stopped
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: change-me-in-local-env
+      KC_DB: dev-file
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '8180:8080' # OIDC issuer for local dev: http://localhost:8180/realms/referralplatform
+    volumes:
+      # Realm import — GP/specialist/patient/carer/internal-staff clients and the
+      # carer-vs-patient / OTP custom auth flow get defined here as the platform
+      # is built out. See infra/keycloak/README.md.
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      start_period: 40s
+      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/8080 && echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "UP" <&3']
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: referralplatform-mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025' # SMTP — every service's local email (incl. OTP/account-activation) sends here
+      - '8025:8025' # Web UI — http://localhost:8025 to read OTP emails during local dev/testing
+
+  # ---------------------------------------------------------------------------
+  # Services (services/*) — see root CONVENTIONS.md for the shared Dockerfile
+  # pattern. Business logic is not yet implemented; each currently exposes only
+  # GET /health. Uncomment `build:` blocks to build locally instead of relying
+  # on a pre-built image once these are pushed to a registry in CI.
+  # ---------------------------------------------------------------------------
+
+  identity-access:
+    build: { context: ., dockerfile: services/identity-access/Dockerfile }
+    container_name: referralplatform-identity-access
+    ports: ['3001:3001']
+    environment:
+      <<: *node-service-env
+      PORT: 3001
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=identity_access
+      KEYCLOAK_CLIENT_ID: identity-access-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  onboarding-account:
+    build: { context: ., dockerfile: services/onboarding-account/Dockerfile }
+    container_name: referralplatform-onboarding-account
+    ports: ['3002:3002']
+    environment:
+      <<: *node-service-env
+      PORT: 3002
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=onboarding_account
+      KEYCLOAK_CLIENT_ID: onboarding-account-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      mailhog: { condition: service_started }
+
+  gp-authorisation:
+    build: { context: ., dockerfile: services/gp-authorisation/Dockerfile }
+    container_name: referralplatform-gp-authorisation
+    ports: ['3003:3003']
+    environment:
+      <<: *node-service-env
+      PORT: 3003
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=gp_authorisation
+      KEYCLOAK_CLIENT_ID: gp-authorisation-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  consent-security:
+    build: { context: ., dockerfile: services/consent-security/Dockerfile }
+    container_name: referralplatform-consent-security
+    ports: ['3004:3004']
+    environment:
+      <<: *node-service-env
+      PORT: 3004
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=consent_security
+      KEYCLOAK_CLIENT_ID: consent-security-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  referral:
+    build: { context: ., dockerfile: services/referral/Dockerfile }
+    container_name: referralplatform-referral
+    ports: ['3005:3005']
+    environment:
+      <<: *node-service-env
+      PORT: 3005
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=referral
+      KEYCLOAK_CLIENT_ID: referral-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      audit-log: { condition: service_started }
+
+  directory:
+    build: { context: ., dockerfile: services/directory/Dockerfile }
+    container_name: referralplatform-directory
+    ports: ['3006:3006']
+    environment:
+      <<: *node-service-env
+      PORT: 3006
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=directory
+      KEYCLOAK_CLIENT_ID: directory-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  booking:
+    build: { context: ., dockerfile: services/booking/Dockerfile }
+    container_name: referralplatform-booking
+    ports: ['3007:3007']
+    environment:
+      <<: *node-service-env
+      PORT: 3007
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=booking
+      KEYCLOAK_CLIENT_ID: booking-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      audit-log: { condition: service_started }
+
+  specialist-review:
+    build: { context: ., dockerfile: services/specialist-review/Dockerfile }
+    container_name: referralplatform-specialist-review
+    ports: ['3008:3008']
+    environment:
+      <<: *node-service-env
+      PORT: 3008
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=specialist_review
+      KEYCLOAK_CLIENT_ID: specialist-review-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      FHIR_GATEWAY_URL: http://fhir-gateway:3013
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  followup-recall:
+    build: { context: ., dockerfile: services/followup-recall/Dockerfile }
+    container_name: referralplatform-followup-recall
+    ports: ['3009:3009']
+    environment:
+      <<: *node-service-env
+      PORT: 3009
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=followup_recall
+      KEYCLOAK_CLIENT_ID: followup-recall-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
+  notification:
+    build: { context: ., dockerfile: services/notification/Dockerfile }
+    container_name: referralplatform-notification
+    ports: ['3010:3010']
+    environment:
+      <<: *node-service-env
+      PORT: 3010
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=notification
+      KEYCLOAK_CLIENT_ID: notification-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      # SMS provider is mocked for local dev (no paid account) — real OTP/account
+      # activation email goes through mailhog instead. See modules-and-requirements.md.
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMS_PROVIDER: mock
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      mailhog: { condition: service_started }
+
+  admin-console:
+    build: { context: ., dockerfile: services/admin-console/Dockerfile }
+    container_name: referralplatform-admin-console
+    ports: ['3011:3011']
+    environment:
+      <<: *node-service-env
+      PORT: 3011
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=admin_console
+      KEYCLOAK_CLIENT_ID: admin-console-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      audit-log: { condition: service_started }
+
+  audit-log:
+    build: { context: ., dockerfile: services/audit-log/Dockerfile }
+    container_name: referralplatform-audit-log
+    ports: ['3012:3012']
+    environment:
+      NODE_ENV: development
+      PORT: 3012
+      REDIS_URL: redis://redis:6379
+      KEYCLOAK_ISSUER: http://keycloak:8080/realms/referralplatform
+      KEYCLOAK_CLIENT_ID: audit-log-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=audit_log
+      IMMUDB_ADDRESS: immudb:3322
+      IMMUDB_USERNAME: immudb
+      IMMUDB_PASSWORD: change-me-in-local-env
+      IMMUDB_DATABASE: audit_log
+      NASH_SIGNING_KEY_PATH: /run/secrets/local-dev-only-nash-key.pem
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      immudb: { condition: service_healthy }
+
+  fhir-gateway:
+    # Self-contained Maven module — build context is its own directory, not the
+    # monorepo root. See services/fhir-gateway/README.md.
+    build: { context: services/fhir-gateway, dockerfile: services/fhir-gateway/Dockerfile }
+    container_name: referralplatform-fhir-gateway
+    ports: ['3013:3013']
+    environment:
+      HI_SERVICE_BASE_URL: https://hi-service.example.gov.au
+      NASH_SIGNING_KEY_PATH: /run/secrets/local-dev-only-nash-key.pem
+      MHR_BASE_URL: https://mhr.example.gov.au
+
+  # ---------------------------------------------------------------------------
+  # Apps (apps/*) — the three Next.js web surfaces + the Expo patient-mobile app.
+  # ---------------------------------------------------------------------------
+
+  gp-portal:
+    build: { context: ., dockerfile: apps/gp-portal/Dockerfile }
+    container_name: referralplatform-gp-portal
+    ports: ['3100:3100']
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+    depends_on:
+      - identity-access
+      - referral
+      - gp-authorisation
+      - notification
+
+  specialist-portal:
+    build: { context: ., dockerfile: apps/specialist-portal/Dockerfile }
+    container_name: referralplatform-specialist-portal
+    ports: ['3101:3101']
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
+      NEXT_PUBLIC_SPECIALIST_REVIEW_URL: http://localhost:3008
+      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+    depends_on:
+      - identity-access
+      - specialist-review
+      - booking
+      - directory
+
+  patient-web:
+    build: { context: ., dockerfile: apps/patient-web/Dockerfile }
+    container_name: referralplatform-patient-web
+    ports: ['3102:3102']
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
+      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:3002
+      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+    depends_on:
+      - identity-access
+      - onboarding-account
+      - consent-security
+      - referral
+
+  patient-mobile:
+    # Expo/React Native has no meaningful production Docker image (it ships to
+    # app stores, not a container) — this entry runs the Metro dev server only,
+    # so `docker compose up patient-mobile` gives a consistent way to start it
+    # alongside the rest of the stack. See apps/patient-mobile/README.md for the
+    # normal (non-Docker) local workflow, which is usually more convenient for
+    # actually developing against a simulator/device.
+    image: node:20-alpine
+    container_name: referralplatform-patient-mobile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - '8081:8081' # Metro bundler
+      - '19000:19000' # Expo dev tools
+    environment:
+      EXPO_PUBLIC_ONBOARDING_ACCOUNT_SERVICE_URL: http://localhost:3002
+      EXPO_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      EXPO_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+    command: sh -c "npm install --workspace=apps/patient-mobile --include-workspace-root && npm run start -w apps/patient-mobile -- --web"
+    depends_on:
+      - identity-access
+      - onboarding-account
+
+volumes:
+  postgres-data:
+  redis-data:
+  immudb-data:

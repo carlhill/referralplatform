@@ -6,9 +6,26 @@
 // (see .env.example), not hardcoded here, so the same schema.prisma works in
 // every environment.
 //
-// First model in this service? Run:
-//   npx prisma migrate dev --name init
-// which creates prisma/migrations/ (commit it) and generates the client.
+// This service is the internal staff BFF over three already-real workflows
+// (see BUILD_LOG/admin-console.md for the full design rationale):
+//  - AHPRA/WWCC manual verification queue: admin-console OWNS this data —
+//    neither onboarding-account (AHPRA-automated specialist/GP-practice
+//    verification) nor any other service exposes a "pending manual review"
+//    queue or a WWCC data model at all (WWCC has no automated national
+//    check today — minors-multigp-exception-paths.md recommends exactly
+//    this: capture check number + issuing state, manual-verify against the
+//    issuing state's own portal). VerificationCase below is that queue.
+//  - Deceased-patient access-request review: NOT owned here — consent-security
+//    already has a complete, real, human-reviewed access-request workflow
+//    (services/consent-security/src/deceased). admin-console proxies it
+//    (see src/deceased-access-requests), so no local model for it.
+//  - PHN/practice onboarding pipeline: onboarding-account owns the
+//    authoritative GpPractice record (HPI-O verification, compliance
+//    checklist) but exposes no list/pipeline-stage-tracking endpoint.
+//    PracticeOnboardingCase below is admin-console's own pipeline-tracking
+//    record, linked to the real GpPractice.id once one exists.
+//  - Audit-log query tool: NOT owned here — thin usage of
+//    @referralplatform/audit-client against the real Audit Log Service.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,9 +36,123 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models below, e.g.:
-//
-// model Placeholder {
-//   id        String   @id @default(uuid())
-//   createdAt DateTime @default(now())
-// }
+/// The AHPRA/WWCC manual verification queue — ui-design.md's "Admin/Ops
+/// Console" screen 1. A case is opened by staff (prompted by an
+/// ahpra_verification_failed/hpio_verification_failed audit event they were
+/// alerted to out-of-band, a support ticket, or — for WWCC — as a routine
+/// part of onboarding a Justice-Dept/social-services caseworker per
+/// minors-multigp-exception-paths.md, which has no other home in this
+/// build). Nothing here auto-approves; see verification-cases.service.ts.
+model VerificationCase {
+  id String @id @default(uuid())
+
+  /// 'ahpra_specialist' | 'gp_practice_hpio' | 'wwcc'
+  caseType String
+
+  /// Opaque reference into another service's own schema (never a Prisma
+  /// foreign key across schemas — root CONVENTIONS.md §6). 'Specialist' |
+  /// 'GpPractice' | null (WWCC cases for a caseworker who may not have any
+  /// platform record yet).
+  entityType String?
+  entityId   String?
+
+  subjectName       String
+  /// AHPRA number / HPI-O / WWCC check number, as applicable.
+  subjectIdentifier String?
+  /// AustralianState — the issuing state for a WWCC check.
+  issuingState      String?
+
+  /// Last snapshot pulled from the source service via refresh() — see
+  /// onboarding-account.client.ts. Null for WWCC cases (no source service).
+  lastKnownAutomatedStatus String?
+  lastKnownAutomatedDetail Json?
+  lastRefreshedAt          DateTime?
+
+  /// open | approved | rejected | needs_info
+  status String @default("open")
+
+  assignedStaffId String?
+  notes           String?
+
+  decisionNote     String?
+  decidedByStaffId String?
+  decidedAt        DateTime?
+
+  createdByStaffId String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([caseType])
+  @@index([entityType, entityId])
+  @@map("verification_cases")
+}
+
+/// The PHN/practice onboarding pipeline — ui-design.md screen 3. Tracks a
+/// practice through stages onboarding-account's GpPractice record alone
+/// can't represent (pre-registration leads, PHN affiliation, contract/
+/// integration-tier negotiation) and mirrors the real HPI-O verification /
+/// compliance-checklist state once the practice registers there.
+model PracticeOnboardingCase {
+  id String @id @default(uuid())
+
+  /// Set once the practice has actually registered in onboarding-account
+  /// (GpPractice.id) — null while still a pre-registration lead.
+  gpPracticeId String?
+
+  practiceName String
+  hpiO         String?
+  /// Primary Health Network affiliation — not modelled anywhere else yet.
+  phn          String?
+  /// AustralianState
+  state        String?
+
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  /// lead | contacted | registered | hpio_verification_pending |
+  /// hpio_verified | hpio_verification_failed |
+  /// compliance_checklist_pending | compliance_checklist_acknowledged |
+  /// live | stalled — see pipeline-stage.ts for the allowed transitions.
+  stage String @default("lead")
+
+  /// Snapshot pulled from onboarding-account's GpPractice via refresh().
+  lastKnownVerificationStatus String?
+  lastKnownComplianceAckAt    DateTime?
+  lastRefreshedAt             DateTime?
+
+  integrationTier String?
+  notes           String?
+  assignedStaffId String?
+
+  createdByStaffId String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([stage])
+  @@index([gpPracticeId])
+  @@map("practice_onboarding_cases")
+}
+
+/// Outbox pattern for audit-log writes — see root CONVENTIONS.md §7 and
+/// packages/audit-client/src/outbox.ts's suggested shape. Written in the
+/// same DB transaction as the domain row it documents; relayed to the real
+/// Audit Log Service by AuditOutboxRelayService (src/audit-outbox), a
+/// @nestjs/schedule interval job, which marks each row published once the
+/// signed write succeeds.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

@@ -7,7 +7,7 @@
     "dev": "next dev -p 3102",
     "build": "next build",
     "start": "next start -p 3102",
-    "lint": "eslint app --max-warnings=0",
+    "lint": "eslint app lib components --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },

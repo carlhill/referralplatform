@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { render } from '@testing-library/react-native';
+import { render, waitFor } from '@testing-library/react-native';
 import App from './App';
 
 describe('App', () => {
-  it('renders the ReferralPlatform title', () => {
+  it('boots to the sign-in screen when no session is stored', async () => {
     const { getByText } = render(<App />);
-    expect(getByText('ReferralPlatform')).toBeTruthy();
+    await waitFor(() => expect(getByText('Sign in to ReferralPlatform')).toBeTruthy(), { timeout: 5000 });
+    expect(getByText(/Continue setting up a new account/)).toBeTruthy();
   });
 });

@@ -4,7 +4,11 @@ Next.js companion web app for the patient/carer's bigger-screen use cases (docum
 
 Next.js (App Router) + TypeScript, built on `@referralplatform/ui-components` and
 `@referralplatform/shared-types`. See root `CONVENTIONS.md` and `claude/ui-design.md`
-(project doc) for the full screen inventory this app will grow into.
+(project doc) for the full screen inventory — implemented in this build; see
+`BUILD_LOG/patient-app.md` for the full write-up of what's real vs. mocked. Screens:
+onboarding activation, home dashboard, GP-approval requests, referral list/detail with
+secure message thread, booking preference capture, consent & security, raise a
+concern, document vault.
 
 ## Run locally
 

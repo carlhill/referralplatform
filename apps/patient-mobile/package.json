@@ -16,9 +16,15 @@
   "dependencies": {
     "@referralplatform/shared-types": "*",
     "expo": "^57.0.12",
+    "expo-auth-session": "^57.0.6",
+    "expo-linking": "^57.0.5",
+    "expo-local-authentication": "^57.0.2",
+    "expo-secure-store": "^57.0.1",
     "expo-status-bar": "^57.0.1",
+    "expo-web-browser": "^57.0.2",
     "react": "19.2.8",
-    "react-native": "0.87.0"
+    "react-native": "0.87.0",
+    "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

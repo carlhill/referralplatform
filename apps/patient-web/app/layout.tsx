@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import '@referralplatform/ui-components/dist/tokens.css';
 import './globals.css';
+import { AuthProvider } from '../lib/auth/AuthContext';
+import { Nav } from '../components/Nav';
 
 export const metadata: Metadata = {
   title: 'ReferralPlatform — Patient Companion Web',
@@ -11,7 +13,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>
+          <Nav />
+          <main style={{ maxWidth: 900, margin: '0 auto', padding: 'var(--rp-space-4)' }}>{children}</main>
+        </AuthProvider>
+      </body>
     </html>
   );
 }

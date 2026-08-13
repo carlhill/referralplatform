@@ -1,56 +1,66 @@
+import * as React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { AuthProvider, useAuth } from './lib/auth/AuthContext';
+import { NavProvider } from './lib/nav';
+import { RootRouter } from './screens/RootRouter';
+import { AppLockScreen } from './screens/AppLockScreen';
+import { promptAppUnlock } from './lib/auth/biometricLock';
 
 /**
- * Skeleton screen — see claude/ui-design.md, "Patient/carer mobile app (+ companion
- * web)" for the real screen inventory (Onboarding, Home/dashboard, Referral detail,
- * Booking, New GP approval, Consent & security, Raise a concern, Document vault).
- * Passkey/WebAuthn support on React Native is flagged as a real risk in
- * claude/solution-architecture-tech-stack.md — budget time to validate it early.
- *
- * NOTE: uses a plain `View` for this placeholder, not `SafeAreaView` from
- * react-native (deprecated) — wire up `react-native-safe-area-context` when
- * the real Onboarding/Home screens replace this skeleton.
+ * App-lock gate — the "biometric app-lock" half of this build's "OTP +
+ * biometric app-lock as the working default" instruction (see
+ * lib/auth/biometricLock.ts's doc comment for the full rationale and the
+ * passkey/WebAuthn-on-Expo risk this is the concrete fallback for). Only
+ * gates screens once a session exists; unauthenticated flows (onboarding,
+ * login) are never locked.
  */
-export default function App() {
-  return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>ReferralPlatform</Text>
-        <Text style={styles.subtitle}>Patient &amp; carer app — skeleton, not yet implemented</Text>
-      </View>
-      <StatusBar style="auto" />
-    </View>
-  );
+function AppLockGate({ children }: { children: React.ReactNode }) {
+  const auth = useAuth();
+  const [unlocked, setUnlocked] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const attemptedForToken = React.useRef<string | null>(null);
+
+  const attemptUnlock = React.useCallback(async () => {
+    setError(null);
+    const result = await promptAppUnlock();
+    if (result.success) {
+      setUnlocked(true);
+    } else {
+      setError(result.error ?? 'Could not verify — try again.');
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (auth.status !== 'authenticated' || !auth.accessToken) {
+      setUnlocked(false);
+      attemptedForToken.current = null;
+      return;
+    }
+    if (attemptedForToken.current === auth.accessToken) return;
+    attemptedForToken.current = auth.accessToken;
+    void attemptUnlock();
+  }, [auth.status, auth.accessToken, attemptUnlock]);
+
+  if (auth.status === 'authenticated' && !unlocked) {
+    return <AppLockScreen onRetry={attemptUnlock} error={error} />;
+  }
+  return <>{children}</>;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f7f9fa',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 24,
-    width: '100%',
-    maxWidth: 480,
-    shadowColor: '#172023',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#172023',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 17,
-    color: '#566268',
-  },
-});
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <AuthProvider>
+          <NavProvider initial={{ name: 'home' }}>
+            <AppLockGate>
+              <RootRouter />
+            </AppLockGate>
+          </NavProvider>
+        </AuthProvider>
+        <StatusBar style="auto" />
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}

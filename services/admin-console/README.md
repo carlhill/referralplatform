@@ -7,6 +7,41 @@ functional/non-functional requirements, and root `CONVENTIONS.md` for the
 patterns every service follows (this service is stamped from that template —
 structure, scripts, and file layout are identical across all 12 services).
 
+See `BUILD_LOG/admin-console.md` for the full build write-up (design
+decisions, what's mocked/interim, known gaps).
+
+## API
+
+Every route requires a bearer token (`BearerAuthGuard`) **and** an
+`internal_staff` principal (`requireStaff`) — this entire service is
+internal-staff-only tooling, per `ui-design.md`'s "Admin/Ops Console
+(internal staff)" screen inventory.
+
+| Module | Method | Path | Notes |
+|---|---|---|---|
+| AHPRA/WWCC verification queue | `POST` | `/verification-cases` | Opens a case; best-effort snapshots automated status immediately. |
+| | `GET` | `/verification-cases?status=&caseType=` | |
+| | `GET` | `/verification-cases/:id` | |
+| | `POST` | `/verification-cases/:id/refresh` | Re-pulls automated status from onboarding-account; never decides the case. |
+| | `POST` | `/verification-cases/:id/assign` | |
+| | `POST` | `/verification-cases/:id/needs-info` | |
+| | `POST` | `/verification-cases/:id/approve` | Step-up (`STEP_UP_ACR`) required. |
+| | `POST` | `/verification-cases/:id/reject` | Step-up (`STEP_UP_ACR`) required. |
+| PHN/practice onboarding pipeline | `POST` | `/practice-onboarding-cases` | Opens a pre-registration lead. |
+| | `GET` | `/practice-onboarding-cases?stage=` | |
+| | `GET` | `/practice-onboarding-cases/:id` | |
+| | `POST` | `/practice-onboarding-cases/:id/refresh` | Pulls HPI-O/compliance-checklist status once linked to a real `GpPractice`. |
+| | `POST` | `/practice-onboarding-cases/:id/advance-stage` | Rejects a transition outside `pipeline-stage.ts`'s allowed graph. |
+| | `POST` | `/practice-onboarding-cases/:id/assign` | |
+| Deceased-patient access requests (proxies consent-security) | `GET` | `/deceased-access-requests/pending` | |
+| | `GET` | `/deceased-access-requests/by-patient/:patientId` | |
+| | `GET` | `/deceased-access-requests/:id` | |
+| | `POST` | `/deceased-access-requests/:id/approve` | Step-up (`STEP_UP_ACR`) required at this console's edge **and** enforced again by consent-security itself. |
+| | `POST` | `/deceased-access-requests/:id/deny` | |
+| Audit-log query tool (proxies the Audit Log Service) | `GET` | `/audit-log-query/by-subject?subjectType=&subjectId=` | |
+| | `GET` | `/audit-log-query/:id` | |
+| | `POST` | `/audit-log-query/:id/verify` | Independently re-verifies the immudb proof + NASH signature — never trusts a cached "valid" flag. |
+
 ## Run locally
 
 ```bash

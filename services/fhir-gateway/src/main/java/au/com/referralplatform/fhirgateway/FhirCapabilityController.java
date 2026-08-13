@@ -11,9 +11,13 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Minimal proof that the HAPI FHIR dependency is actually wired up (not just
  * declared in pom.xml): builds and serialises a real FHIR R4 CapabilityStatement
- * resource describing this gateway. Real conformance/AU Core profile handling,
- * IHI/HPI-O/HPI-I lookups, NASH signing, and MHR integration land here as this
- * service is built out — see claude/modules-and-requirements.md, service #14.
+ * resource describing this gateway. See claude/modules-and-requirements.md,
+ * service #14 for full scope — now implemented in sibling packages: AU Core
+ * profile validation ({@code validation/}), the structured FHIR export
+ * capability ({@code export/}), and the mocked-but-fail-safe Healthcare
+ * Identifiers Service / My Health Record / NASH signing integrations
+ * ({@code hiservice/}, {@code mhr/}, {@code nash/}) — see
+ * BUILD_LOG/fhir-gateway.md.
  *
  * Liveness/readiness for orchestration still comes from Spring Boot Actuator's
  * standard /actuator/health endpoint (see application.yml) — this endpoint is
@@ -22,7 +26,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class FhirCapabilityController {
 
-  private final FhirContext fhirContext = FhirContext.forR4();
+  private final FhirContext fhirContext;
+
+  public FhirCapabilityController(FhirContext fhirContext) {
+    this.fhirContext = fhirContext;
+  }
 
   @GetMapping(value = "/fhir/metadata", produces = MediaType.APPLICATION_JSON_VALUE)
   public String metadata() {

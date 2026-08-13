@@ -75,6 +75,18 @@
       <artifactId>hapi-fhir-validation</artifactId>
       <version>${hapi.fhir.version}</version>
     </dependency>
+    <!-- Base FHIR R4 StructureDefinitions/ValueSets/CodeSystems that
+         DefaultProfileValidationSupport and the terminology support classes
+         need on the classpath to validate against the base spec (Patient,
+         ServiceRequest, Bundle, ...) underneath our AU Core-profile
+         differentials in src/main/resources/au-core/. Without this, the
+         validator can resolve our custom profiles but not their
+         baseDefinition. -->
+    <dependency>
+      <groupId>ca.uhn.hapi.fhir</groupId>
+      <artifactId>hapi-fhir-validation-resources-r4</artifactId>
+      <version>${hapi.fhir.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

@@ -1,0 +1,60 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "au-core-servicerequest-minimal",
+  "url": "http://hl7.org.au/fhir/core/StructureDefinition/au-core-servicerequest",
+  "version": "REFERRALPLATFORM-MINIMAL-1.0",
+  "name": "AUCoreServiceRequestMinimal",
+  "title": "AU Core ServiceRequest (minimal, hand-authored reproduction — see BUILD_LOG/fhir-gateway.md)",
+  "status": "active",
+  "experimental": false,
+  "publisher": "ReferralPlatform — NOT the official HL7 Australia AU Core IG",
+  "description": "Minimal, hand-authored reproduction of the AU Core ServiceRequest profile's key cardinality constraints, used here as the referral document representation (a GP-to-specialist referral is modelled as a FHIR ServiceRequest, the standard FHIR pattern for a clinical request/order). Same caveat as au-core-patient.json: this is a hand-authored reproduction under the real canonical URL, not the officially downloaded AU Core IG package. Replace before relying on it for an actual AU Core conformance claim.",
+  "fhirVersion": "4.0.1",
+  "kind": "resource",
+  "abstract": false,
+  "type": "ServiceRequest",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/ServiceRequest",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "ServiceRequest.status",
+        "path": "ServiceRequest.status",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "ServiceRequest.intent",
+        "path": "ServiceRequest.intent",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "ServiceRequest.code",
+        "path": "ServiceRequest.code",
+        "min": 1,
+        "max": "1",
+        "definition": "The clinical reason for referral must not be absent — this is the substantive content of a referral document."
+      },
+      {
+        "id": "ServiceRequest.subject",
+        "path": "ServiceRequest.subject",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "ServiceRequest.requester",
+        "path": "ServiceRequest.requester",
+        "min": 1,
+        "max": "1",
+        "definition": "The referring GP — required so the referral is traceable to its author, per business-process-flow.md's GP traceability requirement."
+      },
+      {
+        "id": "ServiceRequest.authoredOn",
+        "path": "ServiceRequest.authoredOn",
+        "min": 1,
+        "max": "1"
+      }
+    ]
+  }
+}

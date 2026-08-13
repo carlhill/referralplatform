@@ -21,7 +21,43 @@ management:
 referralplatform:
   hi-service:
     base-url: ${HI_SERVICE_BASE_URL:https://hi-service.example.gov.au}
+    # "block" (default, production-safe): every lookup fails with a clear,
+    # typed error — no real HI Service B2B/NASH credentials exist in this
+    # build, and silently proceeding without a verified IHI/HPI-O/HPI-I would
+    # be worse than blocking the caller. "fixture": returns a small static,
+    # clearly-fake identifier set — for local dev/testing of downstream
+    # happy-path logic only. See hiservice/MockHealthcareIdentifiersService.java.
+    mode: ${HI_SERVICE_MODE:block}
   nash:
     signing-key-path: ${NASH_SIGNING_KEY_PATH:./local-dev-only-nash-key.pem}
+    # Same block/fixture semantics as hi-service.mode — see
+    # nash/MockNashSigningService.java. There is no safe way to "fake" a NASH
+    # signature that means anything legally, so fixture mode still signs with
+    # a local, obviously-non-NASH test keypair, clearly logged as such.
+    mode: ${NASH_MODE:block}
   mhr:
     base-url: ${MHR_BASE_URL:https://mhr.example.gov.au}
+    # Same block/fixture semantics — see mhr/MockMyHealthRecordService.java.
+    mode: ${MHR_MODE:block}
+  audit:
+    # Set false only in tests — every other environment must attempt the
+    # audit-log write (see audit/AuditLogClient.java). Failure to reach the
+    # Audit Log Service never blocks the caller's own request (logged as a
+    # warning instead) — see BUILD_LOG/fhir-gateway.md for why this is a
+    # softer guarantee here than the outbox pattern the NestJS services use.
+    enabled: ${FHIR_GATEWAY_AUDIT_ENABLED:true}
+
+# Same service-to-service auth pattern as every NestJS service (root
+# CONVENTIONS.md §8) — a Keycloak client-credentials token, attached as a
+# bearer token when this service calls the Audit Log Service. NOTE: as of
+# this build, infra/keycloak/realm-export.json does not yet define a
+# `fhir-gateway-service` client and docker-compose.yml does not yet pass
+# these into the fhir-gateway container — see BUILD_LOG/fhir-gateway.md,
+# "Known gaps outside this service's scope".
+keycloak:
+  issuer: ${KEYCLOAK_ISSUER:http://keycloak:8080/realms/referralplatform}
+  client-id: ${KEYCLOAK_CLIENT_ID:fhir-gateway-service}
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:change-me-in-local-env}
+
+audit-log:
+  service-url: ${AUDIT_LOG_SERVICE_URL:http://audit-log:3012}

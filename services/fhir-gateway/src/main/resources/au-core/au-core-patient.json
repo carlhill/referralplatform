@@ -1,0 +1,59 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "au-core-patient-minimal",
+  "url": "http://hl7.org.au/fhir/core/StructureDefinition/au-core-patient",
+  "version": "REFERRALPLATFORM-MINIMAL-1.0",
+  "name": "AUCorePatientMinimal",
+  "title": "AU Core Patient (minimal, hand-authored reproduction — see BUILD_LOG/fhir-gateway.md)",
+  "status": "active",
+  "experimental": false,
+  "publisher": "ReferralPlatform — NOT the official HL7 Australia AU Core IG",
+  "description": "Minimal, hand-authored reproduction of the key AU Core Patient profile cardinality constraints (identifier, name, birthDate), used to prove genuine HAPI FHIR profile-based validation in this build under the same canonical URL the real AU Core Patient profile uses. This is NOT the official published AU Core Patient profile (au.core.r4 npm package) — that package is distributed via the FHIR package registry, which was not reachable from this build's sandbox network policy. A real AU Core Patient profile additionally slices Patient.identifier to require an IHI-system slice, constrains Patient.gender to the AU value set, and carries formal must-support/binding rules this minimal reproduction does not. Replace this file with the real downloaded package before relying on it for an actual AU Core conformance claim; see BUILD_LOG/fhir-gateway.md, 'Known gaps'.",
+  "fhirVersion": "4.0.1",
+  "kind": "resource",
+  "abstract": false,
+  "type": "Patient",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Patient",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Patient.identifier",
+        "path": "Patient.identifier",
+        "min": 1,
+        "max": "*",
+        "definition": "At least one identifier. A real AU Core-conformant profile slices this to require a mandatory IHI slice (system http://ns.electronichealth.net.au/id/hi/ihi/1.0) — this minimal profile checks cardinality only, not the slice."
+      },
+      {
+        "id": "Patient.identifier.system",
+        "path": "Patient.identifier.system",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Patient.identifier.value",
+        "path": "Patient.identifier.value",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Patient.name",
+        "path": "Patient.name",
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Patient.name.family",
+        "path": "Patient.name.family",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Patient.birthDate",
+        "path": "Patient.birthDate",
+        "min": 1,
+        "max": "1"
+      }
+    ]
+  }
+}

@@ -113,9 +113,12 @@ referralplatform/
   its `pom.xml`). Not needed to run the rest of the stack.
 - A machine with outbound network access to Docker Hub/quay.io (to pull base
   images) and to `binaries.prisma.sh` (for each Node service's `prisma
-  generate` build step) — **this build's own sandbox had neither**, which is
-  why the stack has never actually been booted end-to-end before now; see
-  `BUILD_LOG.md`'s "Cross-cutting patterns" section for the full story.
+  generate` build step) — **this build's own original sandbox had neither**,
+  which is why the stack was never booted end-to-end there; see
+  `BUILD_LOG.md`'s "Cross-cutting patterns" section for that history, and
+  [`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md) for how
+  it was subsequently built and verified on a normal machine with network
+  access.
 
 ## How to run this locally
 
@@ -189,12 +192,18 @@ healthy:
    scheduling reminders, visible on the GP Portal's **Follow-up** dashboard and
    the Patient Web app's referral timeline.
 
-**Honesty note**: this exact walkthrough is what `e2e/tests/golden-path.spec.ts`
-automates, but that suite (like the manual walkthrough above) has never been
-executed against a live stack in this build's own sandbox — see
-[`e2e/README.md`](./e2e/README.md) and `BUILD_LOG.md`'s "End-to-end test suite"
-section for the three specific, honestly-documented workarounds it uses and
-what to expect on a first real run (a locator tweak or two, most likely).
+**Honesty note**: this exact walkthrough (patient onboarding → referral →
+specialist review → follow-up plan) has since been exercised end-to-end
+against a live local stack with real data, via direct API calls rather than
+by driving the three web apps by hand — see
+[`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md). Booking
+was exercised in simplified form as a scoped trade-off rather than the full
+slot-proposal UI flow. This is what `e2e/tests/golden-path.spec.ts` automates,
+but that Playwright suite itself still hasn't been run — see
+[`e2e/README.md`](./e2e/README.md) and `BUILD_LOG.md`'s "End-to-end test
+suite" section for the three specific, honestly-documented workarounds it
+uses and what to expect on a first real run (a locator tweak or two, most
+likely).
 
 ### What serves what, once `docker compose up -d` is running
 
@@ -241,8 +250,8 @@ npm run test -w services/referral
 npm run test -w apps/gp-portal
 
 # The Java service:
-cd services/fhir-gateway && mvn clean verify   # see BUILD_LOG.md — not yet run
-                                                 # against Maven Central in this build
+cd services/fhir-gateway && mvn clean verify   # now builds and boots cleanly via
+                                                 # Docker — see BUILD_LOG/local-build-fixes.md
 
 # End-to-end (Playwright, spans gp-portal + specialist-portal + patient-web):
 cd e2e
@@ -253,12 +262,16 @@ npm run test:headed   # watch it drive the three apps
 ```
 
 Every service's own unit test suite passes today (see `BUILD_LOG.md` for exact
-counts, service by service — 400+ tests across the platform). What hasn't run
-yet anywhere is `docker compose up` itself, any service's `test:e2e` against a
-real Postgres/Keycloak, `mvn clean verify` for `fhir-gateway`, and the
-Playwright golden-path suite — all blocked by the same sandbox network policy,
-all expected to work once run somewhere with normal network access. See
-`BUILD_LOG.md`'s "Cross-cutting patterns" section.
+counts, service by service — 400+ tests across the platform). `docker compose
+up` and `mvn clean verify` for `fhir-gateway` have both since been run
+successfully — see
+[`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md). Each
+service's functional behavior has been verified against a real running
+Postgres/Keycloak via direct API calls along the golden path (see the
+"Honesty note" above), though that's not the same as running each service's
+own `test:e2e` npm script. The Playwright golden-path suite still hasn't been
+run — see `BUILD_LOG.md`'s "Cross-cutting patterns" section and
+[`e2e/README.md`](./e2e/README.md).
 
 ---
 
@@ -325,11 +338,12 @@ signatures, not code.
 
 ## TODO
 
-Once the stack has been booted end-to-end in a real network environment (see
-"Cross-cutting patterns" in `BUILD_LOG.md`), the natural next pass is: wire up
-the handful of documented but not-yet-connected cross-service calls (Referral
-Service → Specialist Review's `POST /cases`; Onboarding & Account → Referral
-Service's `activate-queued`; Onboarding & Account → Identity & Access's
-Keycloak user provisioning for a newly activated patient/carer — see
-`BUILD_LOG.md` for the full list, service by service), then run the
-Playwright golden-path suite for real and fix whatever locators need it.
+The stack has now been booted end-to-end in a real network environment (see
+[`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md)). The
+natural next pass is: wire up the handful of documented but
+not-yet-connected cross-service calls (Referral Service → Specialist
+Review's `POST /cases`; Onboarding & Account → Referral Service's
+`activate-queued`; Onboarding & Account → Identity & Access's Keycloak user
+provisioning for a newly activated patient/carer — see `BUILD_LOG.md` for
+the full list, service by service), then run the Playwright golden-path
+suite for real and fix whatever locators need it.

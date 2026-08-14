@@ -391,6 +391,32 @@ If a service uses none of the Prisma-bridge patterns (items 4–5) at all, that'
 not a gap — not every service touches a transaction. Confirm which by grepping the
 service's own `src/` rather than assuming.
 
+**Port-conflict check — if a host-mapped port "works" per `docker ps`/healthchecks but a
+host client (psql, pgAdmin, a browser, etc.) still can't connect,** don't assume it's the
+app, Docker Desktop being generally unhealthy, or antivirus/firewall software before
+checking for a **stale duplicate listener on that exact port**. This happened for real on
+2026-08-15: Postgres's host port (20000) had a healthy, correctly-forwarding
+`com.docker.backend.exe` listener *and* a second, orphaned `wslrelay.exe` bound to the
+loopback interface — Windows routed `localhost`/`127.0.0.1` connections to the dead one,
+which accepted the TCP handshake then silently closed it, producing a misleading "server
+closed the connection unexpectedly" that looked exactly like an antivirus block (see
+`BUILD_LOG/local-build-fixes.md` for the full trail — AVG was checked first and ruled
+out, at real time cost). Same root-cause family as the duplicate `VmmemWSL` memory issue
+documented elsewhere in this repo (see `CLAUDE.md`) — stale WSL2 processes, not just
+stale WSL2 memory.
+
+Check with (PowerShell, run as needed — not just when something's actively broken):
+
+```powershell
+Get-NetTCPConnection -LocalPort <port> | Select-Object LocalAddress,LocalPort,State,OwningProcess
+Get-Process -Id (Get-NetTCPConnection -LocalPort <port>).OwningProcess | Select-Object Id,ProcessName,Path -Unique
+```
+
+If more than one process is listed, that's the bug — kill the stale one
+(`Stop-Process -Id <pid> -Force`) and/or move the service to an unused port in the
+20000+ range (see `docker-compose.yml`'s header comment for the full port map) rather
+than reusing the contested one, since the same relay can reappear.
+
 ---
 
 ## 10. Environment variable conventions

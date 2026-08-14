@@ -15,7 +15,13 @@
 # Container-internal ports are untouched — inter-service traffic on the Docker
 # network still uses each service's normal default port via its DNS name
 # (e.g. postgres:5432, audit-log:3012), only the HOST-exposed side changed.
-#   20000 postgres            (psql / GUI client)
+#   20025 postgres            (psql / GUI client — moved off 20000 2026-08-15:
+#                               a stale wslrelay.exe process kept squatting on
+#                               20000's loopback listener, silently killing
+#                               every psql/pgAdmin connection with "server
+#                               closed the connection unexpectedly" even
+#                               though `docker ps` showed the container healthy
+#                               — see BUILD_LOG/local-build-fixes.md)
 #   20001 redis
 #   20002 immudb (gRPC)       20003 immudb (metrics)
 #   20004 keycloak admin/OIDC
@@ -59,7 +65,7 @@ services:
       POSTGRES_PASSWORD: referralplatform
       POSTGRES_DB: referralplatform
     ports:
-      - '20000:5432'
+      - '20025:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro

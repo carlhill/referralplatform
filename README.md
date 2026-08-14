@@ -1,5 +1,14 @@
 # ReferralPlatform
 
+![Local build](https://img.shields.io/badge/local%20build-verified%20working-brightgreen)
+
+**Status (2026-08-15): all 21 services build, start, and pass health checks via
+`docker compose up -d --build` on a normal local Docker Desktop setup, and the
+full golden path (GP referral → patient account → specialist review → booking
+→ follow-up) has been exercised end-to-end with real data.** See
+[`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md) for the
+full list of what was fixed to get there.
+
 ReferralPlatform automates referral management between doctors and patients in
 Australia. A GP creates a referral; the patient's account is verified and
 activated through an email-link/OTP flow (with a carer/delegate path for
@@ -33,13 +42,18 @@ replacement for it.
 
 **Before exploring further, read [`BUILD_LOG.md`](./BUILD_LOG.md)** — the
 consolidated build log for every service and app, organized by what was built,
-key decisions, what's mocked, and known gaps. The single most important thing
-in it: **no service's Prisma client was ever generated and the full stack was
-never booted end-to-end in the build sandbox** (outbound network policy blocked
-`binaries.prisma.sh` and every Docker registry). Every service typechecks,
-lints, and passes its own unit test suite; what's never been exercised is the
-whole stack wired together over real HTTP. That's the first thing to fix in a
-normal dev environment — see "How to run this locally" below.
+key decisions, what's mocked, and known gaps. It was originally built with one
+major caveat: **no service's Prisma client was ever generated and the full
+stack was never booted end-to-end in the build sandbox** (outbound network
+policy blocked `binaries.prisma.sh` and every Docker registry). Every service
+typechecked, linted, and passed its own unit test suite, but the whole stack
+wired together over real HTTP had never been exercised.
+
+**That gap has since been closed** — see
+[`BUILD_LOG/local-build-fixes.md`](./BUILD_LOG/local-build-fixes.md) for the
+full record of what it took to get a real local build running end-to-end
+(Prisma generation, Docker layer caching, Keycloak realm-import fixes, and
+more) — see "How to run this locally" below to do it yourself.
 
 ## Repo layout
 

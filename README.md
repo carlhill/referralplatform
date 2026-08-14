@@ -25,9 +25,11 @@ in code as `MOCK — replace with real integration`. See
 reference build into a live, regulator-approved production platform.
 
 See the project's `claude/` docs (accessed via the Projects tool against the
-"Doctor Referral Platform" project, not committed to this repo) for the full
-business case, architecture, and requirements — this README is the "how do I
-run it" companion to that project knowledge, not a replacement for it.
+"Doctor Referral Platform" project — a point-in-time snapshot is also mirrored
+in this repo under [`.claude/docs/`](./.claude/docs/) for local/offline
+reference) for the full business case, architecture, and requirements — this
+README is the "how do I run it" companion to that project knowledge, not a
+replacement for it.
 
 **Before exploring further, read [`BUILD_LOG.md`](./BUILD_LOG.md)** — the
 consolidated build log for every service and app, organized by what was built,

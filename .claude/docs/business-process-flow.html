@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReferralPlatform — High-Level Business Process Flow (v3)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<style>
+  :root {
+    --ink: #1a1f2b;
+    --sub: #5b6472;
+    --line: #e2e5ea;
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --accent: #2f6fed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  header {
+    padding: 28px 32px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 21px;
+    font-weight: 650;
+  }
+  header p {
+    margin: 0;
+    color: var(--sub);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 900px;
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 14px 32px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--sub);
+  }
+  .legend span { white-space: nowrap; }
+  .legend b { color: var(--ink); }
+  main {
+    padding: 24px 16px 48px;
+    overflow-x: auto;
+  }
+  .diagram-wrap {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+  footer {
+    text-align: center;
+    color: var(--sub);
+    font-size: 12px;
+    padding: 8px 0 28px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ReferralPlatform — High-Level Business Process Flow (v3)</h1>
+  <p>Draft for review before requirements and solution architecture work begins. v2 added: new-GP authorisation for existing patients (interstate/multiple GPs), an urgent fast-path that bypasses booking preference negotiation, and dual patient+GP notification on every exception, routed into a referral-scoped secure message thread. v3 adds: a "raise a concern" triage entry point (clinical/AHPRA, platform support, or Privacy Officer), and deceased-patient handling that freezes the account, restricts access to executor/family/coroner, and suppresses pending reminders and queued referrals.</p>
+</header>
+
+<div class="legend">
+  <span>🟦 <b>Phase groups</b> — the business modules discussed</span>
+  <span>◇ <b>Diamonds</b> — decision points</span>
+  <span>→ solid arrows — main flow</span>
+  <span>⇢ dashed arrow — continuous/cross-cutting link into Ongoing Consent &amp; Security, or into the exception message thread</span>
+</div>
+
+<main>
+  <div class="diagram-wrap">
+    <pre class="mermaid">
+flowchart TD
+    Start(["GP identifies patient needs\na specialist referral"]) --> AcctCheck{"Patient has active\nReferralPlatform account?"}
+
+    AcctCheck -- No --> O1
+    AcctCheck -- "Yes, but this GP\nnot yet linked" --> GL1
+    AcctCheck -- "Yes, GP\nalready linked" --> C1
+
+    subgraph GPLink["1B. NEW GP AUTHORISATION (existing patient, new/interstate GP)"]
+        direction TB
+        GL1["Push approval request to\npatient's mobile app"] --> GL2{"Patient approves\nnew GP link?"}
+        GL2 -- Yes --> GL3["GP linked to account;\nlogged to audit trail"]
+        GL2 -- "No response or declined" --> GL4["Referral blocked;\nGP notified to contact patient directly"]
+    end
+
+    GL3 --> C1
+
+    subgraph Onboard["1. ACCOUNT ONBOARDING (patient/carer)"]
+        direction TB
+        O1["GP triggers new account request"] --> O2["SMS link sent to patient's mobile"]
+        O2 --> O3["Recipient clicks link;\nverifies DOB / Medicare details"]
+        O3 --> O4{"Patient or carer/\nsupport person?"}
+        O4 -- Patient --> O5["OTP sent + entered\non same mobile"]
+        O5 --> O6["Account activated\n(Patient / Owner role)"]
+        O4 -- Carer --> O7["Collect carer name, email, relationship;\nverify carer's own mobile/email"]
+        O7 --> O8["Notify patient's other\nknown contact channel"]
+        O8 --> O9["Account activated\n(Delegate role)"]
+        O6 --> O10["Prompt passkey enrolment"]
+        O9 --> O10
+    end
+
+    O10 --> C1
+
+    subgraph CreateRef["2. REFERRAL CREATION (GP / patient-requested)"]
+        direction TB
+        C1["GP creates referral —\nin-practice, telehealth,\nor urgent patient-requested"] --> C1u{"Marked urgent?"}
+        C1u -- Yes --> C1x["Fast-path flag set —\nskips booking preference negotiation"]
+        C1u -- No --> C2
+        C1x --> C2{"Flagged category?\n(child / DV / complex,\nstate-keyed rules incl. WWCC)"}
+        C2 -- Yes --> C3["Compliance checklist prompt\n(jurisdiction-specific, decision support only)"]
+        C2 -- No --> C4
+        C3 --> C4["Patient/carer consent captured\n(who can see this referral)"]
+        C4 --> C5["Referral queued\n(up to 2 days if account still activating)"]
+        C5 --> C6{"Queue expires with\nno patient response?"}
+        C6 -- Yes --> C7["GP notified referral lapsed;\nre-trigger required"]
+    end
+
+    C6 -- No --> D1
+
+    subgraph Directory["3. SPECIALIST MATCH AND ROUTING"]
+        direction TB
+        D1["Look up specialist —\nNHSD-synced directory,\nHealthPathways-suggested,\nor self-registered profile"] --> D2["Route referral via secure messaging,\nor directly if specialist onboarded"]
+        D2 --> D3{"Specialist declines\nas inappropriate?"}
+        D3 -- Yes --> D4["Patient AND GP both notified\n(in-app + push);\nGP prompted to choose alternative"]
+    end
+
+    D3 -- No --> B1
+
+    subgraph Booking["4. BOOKING"]
+        direction TB
+        B1["Patient sets day/time preference"] --> B1u{"Urgent fast-path\nflag set?"}
+        B1u -- Yes --> B4x["Earliest available slot\noffered directly"]
+        B1u -- No --> B2["Platform checks specialist/GP\nshared calendar free-busy"]
+        B2 --> B3{"Matching slot\navailable?"}
+        B3 -- Yes --> B4["Slot confirmed;\nwritten to calendar +\nsecure message to reception"]
+        B3 -- No --> B5["Added to waitlist —\nauto-notified when slot opens,\nor message GP to escalate"]
+        B5 --> B4
+        B4x --> B4
+        B4 --> B6{"Patient cancels?"}
+        B6 -- Yes --> B7["Patient AND GP notified;\nslot released to specialist calendar"]
+    end
+
+    B6 -- No --> S1
+
+    subgraph Consult["5. SPECIALIST REVIEW"]
+        direction TB
+        S1["AI-assisted structured extraction\nof referral letter for specialist"] --> S2{"Resolvable via async\nadvice (eConsult-style)?"}
+        S2 -- Yes --> S3["Specialist responds with advice —\nfull appointment avoided"]
+        S2 -- No --> S4["Telehealth or in-person\nappointment occurs"]
+        S4 --> S5["Specialist may request\npre-visit pathology/imaging\nvia e-ordering"]
+    end
+
+    S3 --> F1
+    S5 --> F1
+
+    subgraph Followup["6. FOLLOW-UP AND RECALL"]
+        direction TB
+        F1["Specialist sets Follow-up Plan —\nnext review date, required tests,\nreferral type"] --> F2["Platform schedules reminders\n(patient, carer, GP recall system)"]
+        F2 --> F3{"Test completed?"}
+        F3 -- "Detected automatically\n(pathology e-result / My Health Record)" --> F4["Follow-up Plan\nmarked complete"]
+        F3 -- "Patient self-reports" --> F4
+        F3 -- "Not detected near due date" --> F5["Escalating reminder\nto patient + GP"]
+        F5 --> F3
+        F4 --> F6{"New referral needed, or\nindefinite referral applies?"}
+        F7["GP notified to give\ncourtesy call ~1 month\nbefore due date"]
+        F6 -- "Indefinite / still valid" --> F7
+    end
+
+    F6 -- "New referral needed" --> C1
+
+    subgraph Ongoing["7. ONGOING CONSENT AND SECURITY (continuous, all phases)"]
+        direction TB
+        G1["Patient/carer manage consent page —\nincl. linked GPs/practices list,\nrevoke access"] --> G2["Periodic re-attestation of\ncarer/delegate relationship"]
+        G2 --> G3["All access, consent, and\nexception events logged\nto immutable audit trail"]
+        G4["Referral-scoped secure\nmessage thread\n(patient/GP/specialist)"] -.-> G3
+        G5["Raise a concern —\ntriaged: clinical/AHPRA,\nplatform support, or Privacy Officer"] -.-> G3
+        G6["GP flags patient deceased —\naccount frozen, access restricted to\nexecutor/family/coroner per state rules"] -.-> G3
+    end
+
+    F7 -.-> G1
+    C7 -.-> G4
+    D4 -.-> G4
+    B7 -.-> G4
+    GL4 -.-> G4
+    G6 -.->|suppresses| F2
+    G6 -.->|suppresses| C5
+    </pre>
+  </div>
+</main>
+
+<footer>ReferralPlatform project — draft business process flow v3, 13 August 2026. Not final — for review before requirements &amp; architecture work.</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#eaf1ff',
+      primaryBorderColor: '#2f6fed',
+      primaryTextColor: '#1a1f2b',
+      lineColor: '#5b6472',
+      secondaryColor: '#f7f8fa',
+      tertiaryColor: '#ffffff',
+      fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: true }
+  });
+</script>
+
+</body>
+</html>

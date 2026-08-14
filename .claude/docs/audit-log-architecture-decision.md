@@ -1,0 +1,26 @@
+# Audit tracking system — build vs. open source, and the concrete decision
+
+*Prepared 13 August 2026. Resolves the question directly: yes, there's a genuinely good open-source fit, and the recommendation is to use it rather than build the tamper-evident storage layer from scratch — while still building the healthcare-specific logic (NASH signing, crypto-shredding integration) on top of it, which no off-the-shelf product provides.*
+
+## The decision: immudb, with NASH signing and crypto-shredding built on top
+
+**Use [immudb](https://immudb.io) as the storage engine for the audit log**, not a custom hash-chain implementation, and not a full blockchain/distributed-ledger platform (both already ruled out in the earlier `audit-pathology-medicare-deepdive.md` reasoning — this decision doesn't revisit that, it completes it).
+
+**What immudb actually is:** an open-source (Apache 2.0), immutable, cryptographically verifiable database, purpose-built for exactly this kind of requirement — tamper-evident, append-only records with cryptographic proof that history hasn't been altered. It's the same category of technology as Amazon QLDB or Google's Certificate Transparency logs (both already researched as prior art), except it's open source, self-hostable, and doesn't lock the platform into a single cloud vendor's proprietary ledger product.
+
+**Why this over building it from scratch:** the actual hard engineering problem here — efficient Merkle-tree-based cryptographic proofs, verifiable history, tamper detection, client-side verification tooling — is a solved problem with a mature open-source implementation. Building this in-house means the platform's own engineers become responsible for getting cryptographic data-structure correctness right, forever, on infrastructure this business is not actually differentiated by. That's real risk for no real benefit — the differentiation is in what the audit log records and how it's used (referral traceability, consent enforcement, WWCC/executor-access logging), not in the tamper-evidence primitive itself.
+
+**Why this over a full blockchain/distributed-consensus system** (the user's own original instinct, already addressed): still correct that it's the wrong tool. immudb gives every property that was actually needed — non-repudiation, tamper-evidence, cryptographic verifiability, append-only history — without the operational cost, latency, and complexity of distributed consensus across multiple independent parties, which this platform never needed (ReferralPlatform is a single trusted operator, not a multi-party ledger with no central authority).
+
+## What still has to be built on top (the healthcare-specific layer)
+
+immudb gives tamper-evident storage. It does not know anything about NASH, healthcare identifiers, or crypto-shredding — that's the platform-specific engineering work:
+
+1. **NASH-backed signing before write.** Every audit entry is signed with the writing party's NASH-issued key (or the platform's own NASH organisation certificate for platform-generated events) *before* it's written to immudb. immudb's own cryptographic proof shows the entry hasn't been tampered with since it was written; the NASH signature shows *who* actually asserted it. Both properties are needed — immudb alone proves integrity, not authorship.
+2. **Crypto-shredding integration.** Sensitive field values aren't stored in cleartext in the audit entry — they're encrypted with a per-user key (held in the KMS/HSM layer from the tech stack doc) before the entry is written. "Erasing" a user's data means destroying their key in the KMS, which makes every audit entry referencing that key permanently unreadable, while the immudb entries themselves — and the tamper-evidence chain — remain structurally intact. This is what reconciles the "immutable log" requirement with the right-to-erasure requirement already resolved in the earlier gap analysis.
+3. **The audit event schema itself.** A defined, versioned set of event types — `referral.created`, `consent.granted`, `consent.revoked`, `gp.linked`, `gp.link.declined`, `referral.declined`, `booking.confirmed`, `booking.cancelled`, `concern.raised`, `patient.deceased.flagged`, `access.request.granted` (executor/family/coroner), and so on — each carrying the minimum necessary structured payload, the actor's identifier (HPI-O/HPI-I/IHI as appropriate), and a timestamp. This schema is the actual product of the audit design work, not the storage engine underneath it.
+4. **A verification/query API**, distinct from the write path — GPs, specialists, and (per their own referral) patients need to be able to see a trustworthy history of what happened to a specific referral, and regulators/auditors need the ability to independently verify that a given record hasn't been tampered with, using immudb's own cryptographic proof mechanism rather than trusting the platform's word for it.
+
+## Where it fits in the architecture
+
+Every service that performs a clinical or consent-relevant write does so inside a transactional boundary that also produces the corresponding audit entry (the outbox pattern referenced in the tech stack doc) — no service writes to Postgres and "remembers" to also write to the audit log as a separate, skippable step. This is enforced structurally, not by convention.

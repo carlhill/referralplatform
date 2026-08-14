@@ -330,6 +330,67 @@ with no monorepo dependency, so its build context is its own directory:
 docker build -f services/fhir-gateway/Dockerfile -t referralplatform/fhir-gateway services/fhir-gateway
 ```
 
+**Docker layer caching — copy `package.json` files before source, not `COPY . .` first.**
+Every Node Dockerfile's builder stage must copy only what `npm install` actually needs
+before running it — the root `package.json`/`package-lock.json`, plus the `package.json`
+of each workspace *this service itself depends on* (matching its own `npm run build -w
+...` line) — then `COPY . .` for the rest of the source *after* `npm install` completes:
+
+```dockerfile
+COPY package.json package-lock.json ./
+COPY packages/shared-types/package.json packages/shared-types/package.json
+COPY packages/audit-client/package.json packages/audit-client/package.json
+COPY packages/auth-client/package.json packages/auth-client/package.json
+COPY services/<this-service>/package.json services/<this-service>/package.json
+COPY certs ./certs
+RUN npm install -g npm@11 && npm install --workspaces --include-workspace-root
+COPY . .
+RUN npm run prisma:generate -w services/<this-service>   # if applicable
+RUN npm run build -w packages/shared-types -w ... -w services/<this-service>
+```
+
+Doing `COPY . .` before `npm install` means Docker's cache treats *any* file changing
+*anywhere* in the whole monorepo as "install's inputs changed" — a one-line source edit
+in an unrelated service forces the full multi-minute `npm install --workspaces` to rerun,
+even though install only actually depends on the `package.json`/lockfile contents. npm's
+workspace glob (`services/*`, `apps/*`, `packages/*` in the root `package.json`) resolves
+against whatever's present on disk at install time, so copying only some workspaces'
+`package.json` files is safe — it won't error on the ones that aren't copied yet.
+
+**Pre-flight checklist — verify every one of these for a service *before* considering
+its Docker build done**, not just "it built once." This list exists because every item
+on it was a real, previously-undiscovered bug found the hard way across the first pass
+of getting this stack to build at all — see `BUILD_LOG/local-build-fixes.md` for the
+full story behind each one. Check the service's actual source, don't just assume a
+pattern that held for one service holds for another:
+
+1. **Cert trust + npm upgrade** — Dockerfile has `ENV NODE_EXTRA_CA_CERTS=...` and
+   `npm install -g npm@11` before the workspace install (works around a TLS-inspecting
+   local proxy/antivirus and a known npm 10.8.x crash).
+2. **`prisma:generate` Dockerfile step present** — if the service's `package.json` has a
+   `prisma:generate` script, the Dockerfile must actually `RUN` it before `npm run
+   build`. Six services shipped without this and had a `PrismaClient` with zero
+   generated models as a result — compare `package.json` against the Dockerfile, don't
+   assume one implies the other.
+3. **Prisma pinned to `^6.19.0`**, not a `^7.x` range — this codebase's `schema.prisma`
+   files use pre-v7 syntax that Prisma 7 removed.
+4. **No `args: unknown` in a hand-rolled Prisma bridge interface** (`TxClient`,
+   `<Name>PrismaClient`, `AuditOutboxWriter`, etc.) — must be `args: any`. `unknown`
+   can never structurally satisfy Prisma's real generated method signatures.
+5. **No self-referential `$transaction` field** in a bridge interface (i.e. its own
+   `$transaction`'s callback parameter typed as *itself*) — Prisma's real
+   transaction-callback argument type omits `$transaction` entirely (no nested
+   transactions), so a self-referencing declaration can never be satisfied. A *two-tier*
+   version (`RootPrismaClient extends TxClient`, where `$transaction`'s callback is
+   typed as the separate, narrower `TxClient`) is fine and must be kept, not removed.
+6. **This service's own `.dockerignore`-relevant footprint** — no service-specific
+   exclusions needed beyond the root `.dockerignore`; flag it here if one ever is.
+7. **New package.json-first caching pattern** (above) is in place.
+
+If a service uses none of the Prisma-bridge patterns (items 4–5) at all, that's a pass,
+not a gap — not every service touches a transaction. Confirm which by grepping the
+service's own `src/` rather than assuming.
+
 ---
 
 ## 10. Environment variable conventions

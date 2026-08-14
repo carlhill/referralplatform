@@ -55,7 +55,13 @@ export class OnboardingService {
   ) {}
 
   private cfg(key: string, fallback: number): number {
-    return this.config.get<number>(key, fallback);
+    // NestJS's ConfigService.get<number>(...) is a TypeScript-only type
+    // assertion — env vars (including .env-file values) are always raw
+    // strings at runtime, and ConfigService does no actual coercion. Passing
+    // an uncoerced string straight into a Prisma Int field throws
+    // PrismaClientValidationError; passed into a numeric comparison it just
+    // silently misbehaves. Force a real number here once, for every caller.
+    return Number(this.config.get(key, fallback));
   }
 
   private otpSecret(): string {

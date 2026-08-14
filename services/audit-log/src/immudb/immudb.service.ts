@@ -45,9 +45,18 @@ export class ImmudbService implements OnModuleInit {
     const password = this.config.get<string>('IMMUDB_PASSWORD', 'immudb');
     const database = this.config.get<string>('IMMUDB_DATABASE', 'audit_log');
 
+    // autoLogin/autoDatabase default to true and, left enabled, getInstance()
+    // runs its OWN internal login+listDatabases using IMMUDB_USER/IMMUDB_PWD
+    // env vars (not the IMMUDB_USERNAME/IMMUDB_PASSWORD ones this service
+    // actually sets) — silently skips that login, then still calls
+    // listDatabases unauthenticated, throwing "please login" before this
+    // method's own explicit login() below ever runs. Disabling both is what
+    // this class's doc comment already says it intends: do it manually.
     this.client = await ImmudbClient.getInstance({
       host,
       port: portStr ?? '3322',
+      autoLogin: false,
+      autoDatabase: false,
     });
 
     await this.client.login({ user: username, password });

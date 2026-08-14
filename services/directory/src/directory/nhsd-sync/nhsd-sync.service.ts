@@ -13,13 +13,13 @@ export interface NhsdSyncResult {
 /** The minimal Prisma surface this service needs — kept narrow so unit tests can fake it easily. */
 export interface NhsdSyncPrisma {
   directorySyncRun: {
-    create: (args: unknown) => Promise<{ id: string }>;
-    update: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<{ id: string }>;
+    update: (args: any) => Promise<unknown>;
   };
   directoryEntry: {
-    findUnique: (args: unknown) => Promise<{ id: string; selfRegisteredOverride: boolean } | null>;
-    create: (args: unknown) => Promise<unknown>;
-    update: (args: unknown) => Promise<unknown>;
+    findUnique: (args: any) => Promise<{ id: string; selfRegisteredOverride: boolean } | null>;
+    create: (args: any) => Promise<unknown>;
+    update: (args: any) => Promise<unknown>;
   };
 }
 

@@ -24,8 +24,8 @@ export interface ConcernEntity {
 
 interface TxClient extends OutboxTxClient {
   concern: {
-    create: (args: unknown) => Promise<ConcernEntity>;
-    update: (args: unknown) => Promise<ConcernEntity>;
+    create: (args: any) => Promise<ConcernEntity>;
+    update: (args: any) => Promise<ConcernEntity>;
   };
 }
 

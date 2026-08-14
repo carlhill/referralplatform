@@ -8,19 +8,25 @@
 # microservice). Each service's DATABASE_URL below points at the same `postgres`
 # container with a distinct `?schema=` query param.
 #
-# Port map (host:container) — every port a human needs to hit from outside Docker:
-#   5432  postgres            (psql / GUI client)
-#   6379  redis
-#   3322  immudb (gRPC)       9497  immudb (metrics)
-#   8180  keycloak admin/OIDC (mapped off 8080 to avoid clashing with immudb tooling)
-#   1025  mailhog (SMTP)      8025  mailhog (web UI — view OTP/account-activation emails here)
-#   3001  identity-access     3002  onboarding-account   3003  gp-authorisation
-#   3004  consent-security    3005  referral             3006  directory
-#   3007  booking             3008  specialist-review    3009  followup-recall
-#   3010  notification        3011  admin-console         3012  audit-log
-#   3013  fhir-gateway (Java/Spring Boot — see services/fhir-gateway/README.md)
-#   3100  gp-portal           3101  specialist-portal    3102  patient-web
-#   8081  patient-mobile (Metro bundler — see apps/patient-mobile/README.md)
+# Port map (host:container) — every port a human needs to hit from outside Docker.
+# Host side deliberately uses a clean sequential 20000+ range (Carl's request,
+# 2026-08-14) so nothing here can collide with whatever's already using the
+# "normal" default ports (5432, 6379, 3000-range, etc.) on a dev machine.
+# Container-internal ports are untouched — inter-service traffic on the Docker
+# network still uses each service's normal default port via its DNS name
+# (e.g. postgres:5432, audit-log:3012), only the HOST-exposed side changed.
+#   20000 postgres            (psql / GUI client)
+#   20001 redis
+#   20002 immudb (gRPC)       20003 immudb (metrics)
+#   20004 keycloak admin/OIDC
+#   20005 mailhog (SMTP)      20006 mailhog (web UI — view OTP/account-activation emails here)
+#   20007 identity-access     20008 onboarding-account   20009 gp-authorisation
+#   20010 consent-security    20011 referral             20012 directory
+#   20013 booking             20014 specialist-review    20015 followup-recall
+#   20016 notification        20017 admin-console         20018 audit-log
+#   20019 fhir-gateway (Java/Spring Boot — see services/fhir-gateway/README.md)
+#   20020 gp-portal           20021 specialist-portal    20022 patient-web
+#   20023 patient-mobile (Metro bundler)  20024 patient-mobile (Expo dev tools)
 #
 # Every Node service Dockerfile expects the MONOREPO ROOT as its build context
 # (it needs packages/shared-types, packages/audit-client, packages/auth-client) —
@@ -53,7 +59,7 @@ services:
       POSTGRES_PASSWORD: referralplatform
       POSTGRES_DB: referralplatform
     ports:
-      - '5432:5432'
+      - '20000:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
@@ -66,7 +72,7 @@ services:
     container_name: referralplatform-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '20001:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -80,13 +86,17 @@ services:
     environment:
       IMMUDB_ADMIN_PASSWORD: change-me-in-local-env
     ports:
-      - '3322:3322' # gRPC — the Audit Log Service connects here (see services/audit-log/.env.example)
-      - '9497:9497' # Prometheus metrics
+      - '20002:3322' # gRPC — the Audit Log Service connects here (see services/audit-log/.env.example)
+      - '20003:9497' # Prometheus metrics
     volumes:
       - immudb-data:/var/lib/immudb
     healthcheck:
+      # codenotary/immudb ships no shell and no network tools (nc/curl/wget) at
+      # all, so a true readiness probe isn't available — `nc -z` here always
+      # failed regardless of immudb's actual state. Falls back to "the
+      # binary can still execute" as a liveness signal.
       <<: *healthcheck-defaults
-      test: ['CMD', 'nc', '-z', 'localhost', '3322']
+      test: ['CMD', '/usr/sbin/immudb', 'version']
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -99,7 +109,7 @@ services:
       KC_DB: dev-file
       KC_HEALTH_ENABLED: 'true'
     ports:
-      - '8180:8080' # OIDC issuer for local dev: http://localhost:8180/realms/referralplatform
+      - '20004:8080' # OIDC issuer for local dev: http://localhost:20004/realms/referralplatform
     volumes:
       # Realm import — GP/specialist/patient/carer/internal-staff clients and the
       # carer-vs-patient / OTP custom auth flow get defined here as the platform
@@ -111,7 +121,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'exec 3<>/dev/tcp/localhost/8080 && echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "UP" <&3',
+          'exec 3<>/dev/tcp/localhost/9000 && echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "UP" <&3',
         ]
 
   mailhog:
@@ -119,8 +129,8 @@ services:
     container_name: referralplatform-mailhog
     restart: unless-stopped
     ports:
-      - '1025:1025' # SMTP — every service's local email (incl. OTP/account-activation) sends here
-      - '8025:8025' # Web UI — http://localhost:8025 to read OTP emails during local dev/testing
+      - '20005:1025' # SMTP — every service's local email (incl. OTP/account-activation) sends here
+      - '20006:8025' # Web UI — http://localhost:20006 to read OTP emails during local dev/testing
 
   # ---------------------------------------------------------------------------
   # Services (services/*) — see root CONVENTIONS.md for the shared Dockerfile
@@ -135,14 +145,14 @@ services:
   identity-access:
     build: { context: ., dockerfile: services/identity-access/Dockerfile }
     container_name: referralplatform-identity-access
-    ports: ['3001:3001']
+    ports: ['20007:3001']
     environment:
       <<: *node-service-env
       PORT: 3001
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=identity_access
       KEYCLOAK_CLIENT_ID: identity-access-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
-      ACCOUNT_LINK_ALLOWED_ORIGINS: http://localhost:3100,http://localhost:3101,http://localhost:3102,http://localhost:8081
+      ACCOUNT_LINK_ALLOWED_ORIGINS: http://localhost:20020,http://localhost:20021,http://localhost:20022,http://localhost:20023
       STEP_UP_ACR: passkey
       # MOCK myID (TDIF) relying-party stub — see services/identity-access/src/mock-myid.
       # Must be the address Keycloak's container can reach, not "localhost".
@@ -157,7 +167,7 @@ services:
   onboarding-account:
     build: { context: ., dockerfile: services/onboarding-account/Dockerfile }
     container_name: referralplatform-onboarding-account
-    ports: ['3002:3002']
+    ports: ['20008:3002']
     environment:
       <<: *node-service-env
       PORT: 3002
@@ -171,7 +181,7 @@ services:
       # Activation link is opened in the patient's own browser, outside the compose
       # network — must be the host-published patient-web port, not the internal
       # "patient-web" hostname.
-      ACTIVATION_LINK_BASE_URL: http://localhost:3102/activate
+      ACTIVATION_LINK_BASE_URL: http://localhost:20022/activate
       DIRECTORY_SERVICE_URL: http://directory:3006
       IDENTITY_ACCESS_SERVICE_URL: http://identity-access:3001
     depends_on:
@@ -185,7 +195,7 @@ services:
   gp-authorisation:
     build: { context: ., dockerfile: services/gp-authorisation/Dockerfile }
     container_name: referralplatform-gp-authorisation
-    ports: ['3003:3003']
+    ports: ['20009:3003']
     environment:
       <<: *node-service-env
       PORT: 3003
@@ -201,7 +211,7 @@ services:
   consent-security:
     build: { context: ., dockerfile: services/consent-security/Dockerfile }
     container_name: referralplatform-consent-security
-    ports: ['3004:3004']
+    ports: ['20010:3004']
     environment:
       <<: *node-service-env
       PORT: 3004
@@ -219,7 +229,7 @@ services:
   referral:
     build: { context: ., dockerfile: services/referral/Dockerfile }
     container_name: referralplatform-referral
-    ports: ['3005:3005']
+    ports: ['20011:3005']
     environment:
       <<: *node-service-env
       PORT: 3005
@@ -238,7 +248,7 @@ services:
   directory:
     build: { context: ., dockerfile: services/directory/Dockerfile }
     container_name: referralplatform-directory
-    ports: ['3006:3006']
+    ports: ['20012:3006']
     environment:
       <<: *node-service-env
       PORT: 3006
@@ -264,7 +274,7 @@ services:
   booking:
     build: { context: ., dockerfile: services/booking/Dockerfile }
     container_name: referralplatform-booking
-    ports: ['3007:3007']
+    ports: ['20013:3007']
     environment:
       <<: *node-service-env
       PORT: 3007
@@ -282,7 +292,7 @@ services:
   specialist-review:
     build: { context: ., dockerfile: services/specialist-review/Dockerfile }
     container_name: referralplatform-specialist-review
-    ports: ['3008:3008']
+    ports: ['20014:3008']
     environment:
       <<: *node-service-env
       PORT: 3008
@@ -304,7 +314,7 @@ services:
   followup-recall:
     build: { context: ., dockerfile: services/followup-recall/Dockerfile }
     container_name: referralplatform-followup-recall
-    ports: ['3009:3009']
+    ports: ['20015:3009']
     environment:
       <<: *node-service-env
       PORT: 3009
@@ -321,7 +331,7 @@ services:
   notification:
     build: { context: ., dockerfile: services/notification/Dockerfile }
     container_name: referralplatform-notification
-    ports: ['3010:3010']
+    ports: ['20016:3010']
     environment:
       <<: *node-service-env
       PORT: 3010
@@ -344,7 +354,7 @@ services:
   admin-console:
     build: { context: ., dockerfile: services/admin-console/Dockerfile }
     container_name: referralplatform-admin-console
-    ports: ['3011:3011']
+    ports: ['20017:3011']
     environment:
       <<: *node-service-env
       PORT: 3011
@@ -365,7 +375,7 @@ services:
   audit-log:
     build: { context: ., dockerfile: services/audit-log/Dockerfile }
     container_name: referralplatform-audit-log
-    ports: ['3012:3012']
+    ports: ['20018:3012']
     environment:
       NODE_ENV: development
       PORT: 3012
@@ -398,9 +408,9 @@ services:
   fhir-gateway:
     # Self-contained Maven module — build context is its own directory, not the
     # monorepo root. See services/fhir-gateway/README.md.
-    build: { context: services/fhir-gateway, dockerfile: services/fhir-gateway/Dockerfile }
+    build: { context: services/fhir-gateway, dockerfile: Dockerfile }
     container_name: referralplatform-fhir-gateway
-    ports: ['3013:3013']
+    ports: ['20019:3013']
     environment:
       HI_SERVICE_BASE_URL: https://hi-service.example.gov.au
       HI_SERVICE_MODE: block
@@ -431,7 +441,7 @@ services:
   gp-portal:
     build: { context: ., dockerfile: apps/gp-portal/Dockerfile }
     container_name: referralplatform-gp-portal
-    ports: ['3100:3100']
+    ports: ['20020:3100']
     environment:
       NODE_ENV: development
       # NOTE (see BUILD_LOG/gp-portal.md): these NEXT_PUBLIC_* values are read by
@@ -443,17 +453,17 @@ services:
       # every app's own lib/api/config.ts already falls back to these same
       # localhost defaults, so this block is set for explicitness/completeness
       # per this pass's brief, not because the app was broken without it.
-      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
-      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:3002
-      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
-      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
-      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
-      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
-      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
-      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
-      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:20008
+      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
+      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:20010
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:20016
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: gp-portal
-      NEXT_PUBLIC_APP_BASE_URL: http://localhost:3100
+      NEXT_PUBLIC_APP_BASE_URL: http://localhost:20020
     depends_on:
       - identity-access
       - onboarding-account
@@ -467,18 +477,18 @@ services:
   specialist-portal:
     build: { context: ., dockerfile: apps/specialist-portal/Dockerfile }
     container_name: referralplatform-specialist-portal
-    ports: ['3101:3101']
+    ports: ['20021:3101']
     environment:
       NODE_ENV: development
       # See gp-portal's equivalent block above for why these are localhost, not
       # the internal service hostnames.
-      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
-      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
-      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
-      NEXT_PUBLIC_SPECIALIST_REVIEW_URL: http://localhost:3008
-      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
-      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
-      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+      NEXT_PUBLIC_SPECIALIST_REVIEW_URL: http://localhost:20014
+      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:20013
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: specialist-portal
     depends_on:
       - identity-access
@@ -491,23 +501,23 @@ services:
   patient-web:
     build: { context: ., dockerfile: apps/patient-web/Dockerfile }
     container_name: referralplatform-patient-web
-    ports: ['3102:3102']
+    ports: ['20022:3102']
     environment:
       NODE_ENV: development
       # See gp-portal's equivalent block above for why these are localhost, not
       # the internal service hostnames.
-      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
-      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:3002
-      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
-      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
-      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
-      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
-      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
-      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
-      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
-      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:20008
+      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
+      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:20010
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:20013
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:20016
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: patient-web
-      NEXT_PUBLIC_APP_BASE_URL: http://localhost:3102
+      NEXT_PUBLIC_APP_BASE_URL: http://localhost:20022
     depends_on:
       - identity-access
       - onboarding-account
@@ -532,18 +542,18 @@ services:
     volumes:
       - .:/workspace
     ports:
-      - '8081:8081' # Metro bundler
-      - '19000:19000' # Expo dev tools
+      - '20023:8081' # Metro bundler
+      - '20024:19000' # Expo dev tools
     environment:
-      EXPO_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
-      EXPO_PUBLIC_ONBOARDING_ACCOUNT_SERVICE_URL: http://localhost:3002
-      EXPO_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
-      EXPO_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
-      EXPO_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
-      EXPO_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
-      EXPO_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
-      EXPO_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
-      EXPO_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      EXPO_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+      EXPO_PUBLIC_ONBOARDING_ACCOUNT_SERVICE_URL: http://localhost:20008
+      EXPO_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
+      EXPO_PUBLIC_CONSENT_SECURITY_URL: http://localhost:20010
+      EXPO_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+      EXPO_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+      EXPO_PUBLIC_BOOKING_SERVICE_URL: http://localhost:20013
+      EXPO_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:20016
+      EXPO_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
       EXPO_PUBLIC_KEYCLOAK_CLIENT_ID: patient-mobile
     command: sh -c "npm install --workspace=apps/patient-mobile --include-workspace-root && npm run start -w apps/patient-mobile -- --web"
     depends_on:

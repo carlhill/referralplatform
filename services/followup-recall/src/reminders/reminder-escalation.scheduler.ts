@@ -45,10 +45,10 @@ export class ReminderEscalationScheduler {
     try {
       const now = new Date();
       const prisma = this.prisma as unknown as {
-        followUpPlan: { findMany: (args: unknown) => Promise<OverdueActivePlanRow[]> };
+        followUpPlan: { findMany: (args: any) => Promise<OverdueActivePlanRow[]> };
         reminder: {
-          findMany: (args: unknown) => Promise<ReminderLevelRow[]>;
-          createMany: (args: unknown) => Promise<unknown>;
+          findMany: (args: any) => Promise<ReminderLevelRow[]>;
+          createMany: (args: any) => Promise<unknown>;
         };
       };
 

@@ -16,15 +16,14 @@ interface OutboxRow {
 /** The minimal shape this service needs from Prisma — kept narrow so unit tests can fake it easily. */
 interface RulesTxClient {
   complianceRule: {
-    findMany: (args: unknown) => Promise<ComplianceRuleRecord[]>;
-    create: (args: unknown) => Promise<ComplianceRuleRecord>;
-    update: (args: unknown) => Promise<ComplianceRuleRecord>;
-    findFirst: (args: unknown) => Promise<ComplianceRuleRecord | null>;
+    findMany: (args: any) => Promise<ComplianceRuleRecord[]>;
+    create: (args: any) => Promise<ComplianceRuleRecord>;
+    update: (args: any) => Promise<ComplianceRuleRecord>;
+    findFirst: (args: any) => Promise<ComplianceRuleRecord | null>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
-  $transaction: <T>(fn: (tx: RulesTxClient) => Promise<T>) => Promise<T>;
 }
 
 /**

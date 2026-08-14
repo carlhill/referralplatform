@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.git
+**/dist
+**/.next
+**/build
+**/coverage
+e2e
+.claude
+BUILD_LOG
+BUILD_LOG.md
+*.md

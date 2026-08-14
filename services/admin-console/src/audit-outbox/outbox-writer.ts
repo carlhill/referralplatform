@@ -3,7 +3,7 @@ import type { ActorRef } from '@referralplatform/shared-types';
 /** The minimal shape every module's Prisma transaction client needs for outbox writes. */
 export interface OutboxTxClient {
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

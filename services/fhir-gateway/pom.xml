@@ -87,6 +87,15 @@
       <artifactId>hapi-fhir-validation-resources-r4</artifactId>
       <version>${hapi.fhir.version}</version>
     </dependency>
+    <!-- HAPI-2200 at boot: CachingValidationSupport (used by
+         AuCoreProfileValidationService) needs a cache provider on the
+         classpath — it's not bundled with hapi-fhir-validation itself.
+         caffeine is HAPI's own documented default choice. -->
+    <dependency>
+      <groupId>ca.uhn.hapi.fhir</groupId>
+      <artifactId>hapi-fhir-caching-caffeine</artifactId>
+      <version>${hapi.fhir.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

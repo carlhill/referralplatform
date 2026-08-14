@@ -11,7 +11,7 @@ import type { NotificationAuditEventType } from '../common/audit/notification-au
  */
 export interface AuditOutboxWriter {
   auditOutbox: {
-    create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

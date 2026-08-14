@@ -45,22 +45,22 @@ interface OutboxRow {
 /** The minimal Prisma surface this service needs — kept narrow so unit tests can fake it easily. */
 interface TxClient {
   routingAttempt: {
-    update: (args: unknown) => Promise<RoutingAttemptRecord>;
+    update: (args: any) => Promise<RoutingAttemptRecord>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 
 interface SecureMessagingPrisma {
   directoryEntry: {
-    findUnique: (args: unknown) => Promise<DirectoryEntryLookup | null>;
+    findUnique: (args: any) => Promise<DirectoryEntryLookup | null>;
   };
   routingAttempt: {
-    create: (args: unknown) => Promise<RoutingAttemptRecord>;
-    update: (args: unknown) => Promise<RoutingAttemptRecord>;
-    findUnique: (args: unknown) => Promise<RoutingAttemptRecord | null>;
-    findMany: (args: unknown) => Promise<RoutingAttemptRecord[]>;
+    create: (args: any) => Promise<RoutingAttemptRecord>;
+    update: (args: any) => Promise<RoutingAttemptRecord>;
+    findUnique: (args: any) => Promise<RoutingAttemptRecord | null>;
+    findMany: (args: any) => Promise<RoutingAttemptRecord[]>;
   };
   $transaction: <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
 }

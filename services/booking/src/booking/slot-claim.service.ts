@@ -18,21 +18,20 @@ interface OutboxRow {
 /** The minimal shape this service needs from a Prisma transaction client — kept narrow so unit tests can fake it easily (mirrors services/referral/src/referral/referral.service.ts's TxClient pattern). */
 export interface TxClient {
   slot: {
-    updateMany: (args: unknown) => Promise<{ count: number }>;
-    findUnique: (args: unknown) => Promise<SlotRecord | null>;
-    update: (args: unknown) => Promise<SlotRecord>;
+    updateMany: (args: any) => Promise<{ count: number }>;
+    findUnique: (args: any) => Promise<SlotRecord | null>;
+    update: (args: any) => Promise<SlotRecord>;
   };
   booking: {
-    update: (args: unknown) => Promise<BookingRecord>;
+    update: (args: any) => Promise<BookingRecord>;
   };
   waitlistEntry: {
-    update: (args: unknown) => Promise<WaitlistEntryRecord>;
-    findUnique: (args: unknown) => Promise<WaitlistEntryRecord | null>;
+    update: (args: any) => Promise<WaitlistEntryRecord>;
+    findUnique: (args: any) => Promise<WaitlistEntryRecord | null>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
-  $transaction: <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
 }
 
 /**

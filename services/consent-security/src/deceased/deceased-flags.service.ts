@@ -20,11 +20,11 @@ export interface DeceasedFlagEntity {
 
 interface TxClient extends OutboxTxClient {
   deceasedFlag: {
-    create: (args: unknown) => Promise<DeceasedFlagEntity>;
-    update: (args: unknown) => Promise<DeceasedFlagEntity>;
+    create: (args: any) => Promise<DeceasedFlagEntity>;
+    update: (args: any) => Promise<DeceasedFlagEntity>;
   };
   publishedEvent: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

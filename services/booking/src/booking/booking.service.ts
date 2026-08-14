@@ -26,25 +26,24 @@ interface OutboxRow {
 /** The minimal shape this service needs from a Prisma client for its own (non-claim) writes — the claim's own TxClient lives in slot-claim.service.ts. */
 export interface BookingPrismaClient {
   booking: {
-    create: (args: unknown) => Promise<BookingRecord>;
-    update: (args: unknown) => Promise<BookingRecord>;
-    findUnique: (args: unknown) => Promise<BookingRecord | null>;
-    findMany: (args: unknown) => Promise<BookingRecord[]>;
+    create: (args: any) => Promise<BookingRecord>;
+    update: (args: any) => Promise<BookingRecord>;
+    findUnique: (args: any) => Promise<BookingRecord | null>;
+    findMany: (args: any) => Promise<BookingRecord[]>;
   };
   slot: {
-    update: (args: unknown) => Promise<unknown>;
+    update: (args: any) => Promise<unknown>;
   };
   waitlistEntry: {
-    findUnique: (args: unknown) => Promise<{ id: string; status: string } | null>;
-    update: (args: unknown) => Promise<unknown>;
+    findUnique: (args: any) => Promise<{ id: string; status: string } | null>;
+    update: (args: any) => Promise<unknown>;
   };
   calendarConnection: {
-    findUnique: (args: unknown) => Promise<{ id: string; specialistId: string; provider: string; externalCalendarId: string } | null>;
+    findUnique: (args: any) => Promise<{ id: string; specialistId: string; provider: string; externalCalendarId: string } | null>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
-  $transaction: <T>(fn: (tx: BookingPrismaClient) => Promise<T>) => Promise<T>;
 }
 
 /**

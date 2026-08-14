@@ -351,6 +351,6 @@ export class NotificationService {
   }
 
   private async writeLog(data: Omit<NotificationLogRow, 'id' | 'createdAt'>): Promise<NotificationLogRow> {
-    return this.prisma.notificationLog.create({ data });
+    return this.prisma.notificationLog.create({ data: data as any });
   }
 }

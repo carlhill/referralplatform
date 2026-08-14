@@ -83,8 +83,8 @@ export class DeceasedEventPollerService {
   private async getOrCreateCursor(): Promise<CursorRow> {
     const prisma = this.prisma as unknown as {
       eventPollCursor: {
-        findUnique: (args: unknown) => Promise<CursorRow | null>;
-        upsert: (args: unknown) => Promise<CursorRow>;
+        findUnique: (args: any) => Promise<CursorRow | null>;
+        upsert: (args: any) => Promise<CursorRow>;
       };
     };
     const existing = await prisma.eventPollCursor.findUnique({ where: { id: CURSOR_ID } });
@@ -100,7 +100,7 @@ export class DeceasedEventPollerService {
 
   private async setCursor(lastPolledAt: Date): Promise<void> {
     const prisma = this.prisma as unknown as {
-      eventPollCursor: { upsert: (args: unknown) => Promise<CursorRow> };
+      eventPollCursor: { upsert: (args: any) => Promise<CursorRow> };
     };
     await prisma.eventPollCursor.upsert({
       where: { id: CURSOR_ID },

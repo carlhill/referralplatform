@@ -24,11 +24,11 @@ interface OutboxRow {
 /** The minimal shape this service needs from a Prisma transaction client — kept narrow so unit tests can fake it easily. */
 interface TxClient {
   gpLink: {
-    create: (args: unknown) => Promise<GpLinkRecord>;
-    update: (args: unknown) => Promise<GpLinkRecord>;
+    create: (args: any) => Promise<GpLinkRecord>;
+    update: (args: any) => Promise<GpLinkRecord>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

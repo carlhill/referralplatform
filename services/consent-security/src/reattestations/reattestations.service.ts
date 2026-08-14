@@ -18,7 +18,7 @@ export interface ReattestationScheduleEntity {
 
 interface TxClient extends OutboxTxClient {
   reattestationSchedule: {
-    update: (args: unknown) => Promise<ReattestationScheduleEntity>;
+    update: (args: any) => Promise<ReattestationScheduleEntity>;
   };
 }
 

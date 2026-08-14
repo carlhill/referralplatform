@@ -26,25 +26,25 @@ export interface FollowUpPlanRecord {
 
 interface TxClient extends OutboxTxClient {
   followUpPlan: {
-    create: (args: unknown) => Promise<FollowUpPlanRecord>;
-    update: (args: unknown) => Promise<FollowUpPlanRecord>;
-    findUnique: (args: unknown) => Promise<FollowUpPlanRecord | null>;
+    create: (args: any) => Promise<FollowUpPlanRecord>;
+    update: (args: any) => Promise<FollowUpPlanRecord>;
+    findUnique: (args: any) => Promise<FollowUpPlanRecord | null>;
   };
   reminder: {
-    createMany: (args: unknown) => Promise<unknown>;
-    updateMany: (args: unknown) => Promise<unknown>;
+    createMany: (args: any) => Promise<unknown>;
+    updateMany: (args: any) => Promise<unknown>;
   };
   deceasedSuppression?: {
-    findUnique: (args: unknown) => Promise<{ patientId: string; active: boolean } | null>;
+    findUnique: (args: any) => Promise<{ patientId: string; active: boolean } | null>;
   };
 }
 
 interface RootPrismaClient extends TxClient {
   followUpPlan: TxClient['followUpPlan'] & {
-    findMany: (args: unknown) => Promise<FollowUpPlanRecord[]>;
+    findMany: (args: any) => Promise<FollowUpPlanRecord[]>;
   };
   deceasedSuppression: {
-    findUnique: (args: unknown) => Promise<{ patientId: string; active: boolean } | null>;
+    findUnique: (args: any) => Promise<{ patientId: string; active: boolean } | null>;
   };
   $transaction: <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
 }

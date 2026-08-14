@@ -70,8 +70,8 @@ export class ReminderDispatchScheduler {
       const now = new Date();
       const prisma = this.prisma as unknown as {
         reminder: {
-          findMany: (args: unknown) => Promise<DueReminderRow[]>;
-          update: (args: unknown) => Promise<unknown>;
+          findMany: (args: any) => Promise<DueReminderRow[]>;
+          update: (args: any) => Promise<unknown>;
         };
       };
 

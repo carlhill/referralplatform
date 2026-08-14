@@ -80,33 +80,32 @@ interface OutboxRow {
 /** The minimal shape this service needs from a Prisma (transaction) client — kept narrow so unit tests can fake it easily. */
 interface TxClient {
   referralCase: {
-    create: (args: unknown) => Promise<ReferralCaseRecord>;
-    update: (args: unknown) => Promise<ReferralCaseRecord>;
-    findUnique: (args: unknown) => Promise<ReferralCaseRecord | null>;
-    findFirst: (args: unknown) => Promise<ReferralCaseRecord | null>;
-    findMany: (args: unknown) => Promise<ReferralCaseRecord[]>;
+    create: (args: any) => Promise<ReferralCaseRecord>;
+    update: (args: any) => Promise<ReferralCaseRecord>;
+    findUnique: (args: any) => Promise<ReferralCaseRecord | null>;
+    findFirst: (args: any) => Promise<ReferralCaseRecord | null>;
+    findMany: (args: any) => Promise<ReferralCaseRecord[]>;
   };
   extractionResult: {
-    create: (args: unknown) => Promise<ExtractionResultRecord>;
-    update: (args: unknown) => Promise<ExtractionResultRecord>;
-    findUnique: (args: unknown) => Promise<ExtractionResultRecord | null>;
-    findFirst: (args: unknown) => Promise<ExtractionResultRecord | null>;
-    findMany: (args: unknown) => Promise<ExtractionResultRecord[]>;
+    create: (args: any) => Promise<ExtractionResultRecord>;
+    update: (args: any) => Promise<ExtractionResultRecord>;
+    findUnique: (args: any) => Promise<ExtractionResultRecord | null>;
+    findFirst: (args: any) => Promise<ExtractionResultRecord | null>;
+    findMany: (args: any) => Promise<ExtractionResultRecord[]>;
   };
   specialistDecision: {
-    create: (args: unknown) => Promise<SpecialistDecisionRecord>;
-    update: (args: unknown) => Promise<SpecialistDecisionRecord>;
-    findFirst: (args: unknown) => Promise<SpecialistDecisionRecord | null>;
-    findMany: (args: unknown) => Promise<SpecialistDecisionRecord[]>;
+    create: (args: any) => Promise<SpecialistDecisionRecord>;
+    update: (args: any) => Promise<SpecialistDecisionRecord>;
+    findFirst: (args: any) => Promise<SpecialistDecisionRecord | null>;
+    findMany: (args: any) => Promise<SpecialistDecisionRecord[]>;
   };
   pathologyImagingRequest: {
-    create: (args: unknown) => Promise<PathologyImagingRequestRecord>;
-    findMany: (args: unknown) => Promise<PathologyImagingRequestRecord[]>;
+    create: (args: any) => Promise<PathologyImagingRequestRecord>;
+    findMany: (args: any) => Promise<PathologyImagingRequestRecord[]>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
-  $transaction: <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
 }
 
 /**

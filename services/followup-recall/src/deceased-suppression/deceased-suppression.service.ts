@@ -15,14 +15,14 @@ interface FollowUpPlanRow {
 
 interface TxClient extends OutboxTxClient {
   deceasedSuppression: {
-    upsert: (args: unknown) => Promise<unknown>;
+    upsert: (args: any) => Promise<unknown>;
   };
   followUpPlan: {
-    findMany: (args: unknown) => Promise<FollowUpPlanRow[]>;
-    updateMany: (args: unknown) => Promise<{ count: number }>;
+    findMany: (args: any) => Promise<FollowUpPlanRow[]>;
+    updateMany: (args: any) => Promise<{ count: number }>;
   };
   reminder: {
-    updateMany: (args: unknown) => Promise<{ count: number }>;
+    updateMany: (args: any) => Promise<{ count: number }>;
   };
 }
 

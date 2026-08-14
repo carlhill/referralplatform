@@ -11,7 +11,7 @@ import type { OnboardingAuditEventType } from '../common/audit/onboarding-audit-
  */
 export interface AuditOutboxWriter {
   auditOutbox: {
-    create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

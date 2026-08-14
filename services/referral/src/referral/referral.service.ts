@@ -62,22 +62,21 @@ interface OutboxRow {
 /** The minimal shape this service needs from a Prisma transaction client — kept narrow so unit tests can fake it easily. */
 interface TxClient {
   referral: {
-    create: (args: unknown) => Promise<ReferralRecord>;
-    update: (args: unknown) => Promise<ReferralRecord>;
-    findUnique: (args: unknown) => Promise<ReferralRecord | null>;
-    findFirst: (args: unknown) => Promise<ReferralRecord | null>;
-    findMany: (args: unknown) => Promise<ReferralRecord[]>;
+    create: (args: any) => Promise<ReferralRecord>;
+    update: (args: any) => Promise<ReferralRecord>;
+    findUnique: (args: any) => Promise<ReferralRecord | null>;
+    findFirst: (args: any) => Promise<ReferralRecord | null>;
+    findMany: (args: any) => Promise<ReferralRecord[]>;
   };
   complianceFlag: {
-    create: (args: unknown) => Promise<ComplianceFlagRow>;
-    findMany: (args: unknown) => Promise<ComplianceFlagRow[]>;
-    findFirst: (args: unknown) => Promise<ComplianceFlagRow | null>;
-    update: (args: unknown) => Promise<ComplianceFlagRow>;
+    create: (args: any) => Promise<ComplianceFlagRow>;
+    findMany: (args: any) => Promise<ComplianceFlagRow[]>;
+    findFirst: (args: any) => Promise<ComplianceFlagRow | null>;
+    update: (args: any) => Promise<ComplianceFlagRow>;
   };
   auditOutbox: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
-  $transaction: <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>;
 }
 
 /**

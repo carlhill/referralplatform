@@ -26,7 +26,7 @@ export interface AccessRequestEntity {
 
 interface TxClient extends OutboxTxClient {
   accessRequest: {
-    update: (args: unknown) => Promise<AccessRequestEntity>;
+    update: (args: any) => Promise<AccessRequestEntity>;
   };
 }
 

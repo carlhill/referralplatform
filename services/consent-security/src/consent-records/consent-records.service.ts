@@ -27,8 +27,8 @@ export interface ConsentRecordEntity {
 
 interface TxClient extends OutboxTxClient {
   consentRecord: {
-    create: (args: unknown) => Promise<ConsentRecordEntity>;
-    update: (args: unknown) => Promise<ConsentRecordEntity>;
+    create: (args: any) => Promise<ConsentRecordEntity>;
+    update: (args: any) => Promise<ConsentRecordEntity>;
   };
 }
 

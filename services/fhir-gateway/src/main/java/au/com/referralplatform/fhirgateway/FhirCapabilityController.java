@@ -40,7 +40,7 @@ public class FhirCapabilityController {
     capabilityStatement.setFhirVersion(Enumerations.FHIRVersion._4_0_1);
     capabilityStatement.setSoftware(
         new CapabilityStatement.CapabilityStatementSoftwareComponent().setName("ReferralPlatform FHIR Gateway"));
-    capabilityStatement.setFormat(java.util.List.of("json"));
+    capabilityStatement.addFormat("json");
 
     IParser parser = fhirContext.newJsonParser().setPrettyPrint(true);
     return parser.encodeResourceToString(capabilityStatement);

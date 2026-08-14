@@ -10,8 +10,8 @@ import type { PracticeOnboardingCaseRecord } from './practice-onboarding-case-ty
 
 interface TxClient extends OutboxTxClient {
   practiceOnboardingCase: {
-    create: (args: unknown) => Promise<PracticeOnboardingCaseRecord>;
-    update: (args: unknown) => Promise<PracticeOnboardingCaseRecord>;
+    create: (args: any) => Promise<PracticeOnboardingCaseRecord>;
+    update: (args: any) => Promise<PracticeOnboardingCaseRecord>;
   };
 }
 

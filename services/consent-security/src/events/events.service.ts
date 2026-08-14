@@ -11,7 +11,7 @@ export interface PublishedEventEntity {
 
 interface PublishedEventTxClient {
   publishedEvent: {
-    create: (args: unknown) => Promise<unknown>;
+    create: (args: any) => Promise<unknown>;
   };
 }
 

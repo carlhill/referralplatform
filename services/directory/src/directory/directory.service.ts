@@ -32,9 +32,9 @@ export interface DirectoryEntryRecord {
 /** The minimal Prisma surface this service needs — kept narrow so unit tests can fake it easily. */
 export interface DirectoryPrisma {
   directoryEntry: {
-    findMany: (args: unknown) => Promise<DirectoryEntryRecord[]>;
-    findUnique: (args: unknown) => Promise<DirectoryEntryRecord | null>;
-    upsert: (args: unknown) => Promise<DirectoryEntryRecord>;
+    findMany: (args: any) => Promise<DirectoryEntryRecord[]>;
+    findUnique: (args: any) => Promise<DirectoryEntryRecord | null>;
+    upsert: (args: any) => Promise<DirectoryEntryRecord>;
   };
 }
 

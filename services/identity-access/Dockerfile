@@ -8,8 +8,28 @@
 
 FROM node:20-alpine AS builder
 WORKDIR /workspace
+# Copy only what `npm install` actually needs (root + this service's
+# dependency workspaces' package.json, plus the lockfile) before installing —
+# see CONVENTIONS.md §9. `COPY . .` up front means ANY file changing
+# anywhere in the whole monorepo invalidates the expensive install layer's
+# cache too, even a one-line unrelated source edit; splitting it like this
+# means only a package.json/lockfile change forces a reinstall.
+COPY package.json package-lock.json ./
+COPY packages/shared-types/package.json packages/shared-types/package.json
+COPY packages/audit-client/package.json packages/audit-client/package.json
+COPY packages/auth-client/package.json packages/auth-client/package.json
+COPY services/identity-access/package.json services/identity-access/package.json
+COPY certs ./certs
+# Local machines behind a TLS-inspecting proxy/antivirus can drop a root CA at
+# certs/local-ca.pem (gitignored, absent on other machines) - Node just warns
+# and continues if it's missing. Also upgrades past a known npm 10.8.x "Exit
+# handler never called!" crash on large workspace installs. ENV (not a
+# per-RUN export) so it's still in scope for prisma:generate/build below.
+ENV NODE_EXTRA_CA_CERTS=/workspace/certs/local-ca.pem
+RUN npm install -g npm@11 && \
+    npm install --workspaces --include-workspace-root
 COPY . .
-RUN npm install --workspaces --include-workspace-root
+RUN npm run prisma:generate -w services/identity-access
 RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/identity-access
 
 FROM node:20-alpine AS runtime

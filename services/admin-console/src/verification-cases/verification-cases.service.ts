@@ -8,8 +8,8 @@ import type { VerificationCaseRecord } from './verification-case-types';
 
 interface TxClient extends OutboxTxClient {
   verificationCase: {
-    create: (args: unknown) => Promise<VerificationCaseRecord>;
-    update: (args: unknown) => Promise<VerificationCaseRecord>;
+    create: (args: any) => Promise<VerificationCaseRecord>;
+    update: (args: any) => Promise<VerificationCaseRecord>;
   };
 }
 
@@ -103,7 +103,7 @@ export class VerificationCasesService {
 
     return this.prisma.verificationCase.update({
       where: { id },
-      data: { lastKnownAutomatedStatus: snapshot.status, lastKnownAutomatedDetail: snapshot.detail, lastRefreshedAt: new Date() },
+      data: { lastKnownAutomatedStatus: snapshot.status, lastKnownAutomatedDetail: snapshot.detail as any, lastRefreshedAt: new Date() },
     });
   }
 

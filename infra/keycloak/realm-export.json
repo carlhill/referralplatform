@@ -230,12 +230,25 @@
       "secret": "change-me-in-local-env"
     },
     {
+      "clientId": "fhir-gateway-service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-me-in-local-env"
+    },
+    {
       "clientId": "gp-portal",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "_directAccessGrantsComment": "Enabled ONLY so e2e/ (Playwright golden-path test, added during integration) can fetch a real, correctly-signed token via Resource-Owner-Password-Credentials against services/*.test users below, bypassing the mandatory-WebAuthn browser flow (which Playwright cannot drive without a virtual-authenticator harness this pass didn't build). This is the standard, common way test tooling authenticates against a dev-mode Keycloak realm — the 'browser' flow override below (still mandatory passkey) is completely untouched, so a real user hitting the hosted login page still gets the real, unweakened flow.",
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:3100/*"
@@ -249,7 +262,23 @@
       "_authenticationFlowBindingOverridesComment": "GP is a clinician principal type — passkey/hardware key is MANDATORY (AAL2/AAL3), not optional. See identity-security-recommendations.md section 6 and modules-and-requirements.md (\"Identity & Access\").",
       "authenticationFlowBindingOverrides": {
         "browser": "b6f10000-0000-4000-8000-0000000000c1"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "principal-type",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "principal_type",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "principal_type",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     },
     {
       "clientId": "specialist-portal",
@@ -257,7 +286,8 @@
       "protocol": "openid-connect",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "_directAccessGrantsComment": "See gp-portal's equivalent comment above — same e2e-only rationale.",
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:3101/*"
@@ -271,7 +301,23 @@
       "_authenticationFlowBindingOverridesComment": "Specialist is a clinician principal type — same mandatory-passkey rationale as gp-portal above.",
       "authenticationFlowBindingOverrides": {
         "browser": "b6f10000-0000-4000-8000-0000000000c1"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "principal-type",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "principal_type",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "principal_type",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     },
     {
       "clientId": "patient-web",
@@ -279,7 +325,8 @@
       "protocol": "openid-connect",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "_directAccessGrantsComment": "See gp-portal's equivalent comment above — same e2e-only rationale (patient-web's browser flow only requires password+OTP, so this is a smaller relaxation than the clinician portals', but kept consistent/explicit rather than implicit).",
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:3102/*"
@@ -293,7 +340,23 @@
       "_authenticationFlowBindingOverridesComment": "Patient/carer principal type — passkey encouraged, password+OTP fallback acceptable (AAL1/AAL2). See identity-security-recommendations.md section 6.",
       "authenticationFlowBindingOverrides": {
         "browser": "b6f10000-0000-4000-8000-0000000000b1"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "principal-type",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "principal_type",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "principal_type",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     },
     {
       "clientId": "patient-mobile",
@@ -326,6 +389,51 @@
       "_clientRolesComment": "Grants this service's Keycloak client-credentials service account the realm-management roles it needs to call the Admin REST API on a caller's own behalf (list/revoke WebAuthn credentials, force re-enrolment, list/remove federated identities) — see services/identity-access/src/keycloak-admin/keycloak-admin.service.ts. Deliberately NOT manage-realm or manage-clients — least privilege.",
       "clientRoles": {
         "realm-management": ["manage-users", "view-users"]
+      }
+    },
+    {
+      "_e2eTestUserComment": "Added during integration/e2e work (e2e/), not part of the original identity-access build — a fixed-password, fixed-role test principal for Playwright's golden-path test to obtain a real token via Resource Owner Password Credentials (see the gp-portal/specialist-portal/patient-web clients' directAccessGrantsEnabled comments above). Never use this pattern/credential outside a local dev realm.",
+      "username": "gp.test",
+      "email": "gp.test@referralplatform.example.au",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "GP",
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "TestPassword123!", "temporary": false }],
+      "realmRoles": ["gp"],
+      "attributes": {
+        "principal_type": ["gp"]
+      }
+    },
+    {
+      "_e2eTestUserComment": "See gp.test above — same e2e-only rationale.",
+      "username": "specialist.test",
+      "email": "specialist.test@referralplatform.example.au",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Specialist",
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "TestPassword123!", "temporary": false }],
+      "realmRoles": ["specialist"],
+      "attributes": {
+        "principal_type": ["specialist"]
+      }
+    },
+    {
+      "_e2eTestUserComment": "See gp.test above — same e2e-only rationale.",
+      "username": "patient.test",
+      "email": "patient.test@referralplatform.example.au",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Patient",
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "TestPassword123!", "temporary": false }],
+      "realmRoles": ["patient"],
+      "attributes": {
+        "principal_type": ["patient"]
       }
     }
   ],

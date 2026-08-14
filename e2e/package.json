@@ -1,0 +1,15 @@
+{
+  "name": "@referralplatform/e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "End-to-end Playwright test for the ReferralPlatform golden path (GP referral -> directory -> booking -> specialist review -> patient), driven against the docker-compose stack. See README.md for prerequisites and known gaps.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "typescript": "^5.6.3"
+  }
+}

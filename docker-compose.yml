@@ -124,9 +124,12 @@ services:
 
   # ---------------------------------------------------------------------------
   # Services (services/*) — see root CONVENTIONS.md for the shared Dockerfile
-  # pattern. Business logic is not yet implemented; each currently exposes only
-  # GET /health. Uncomment `build:` blocks to build locally instead of relying
-  # on a pre-built image once these are pushed to a registry in CI.
+  # pattern. Real business logic now exists in every service (see each
+  # BUILD_LOG/<service>.md for what's real vs. MOCK-labelled); every external
+  # government/vendor integration (HI Service, AHPRA, NASH, MHR, NHSD
+  # Directory, HealthPathways, HealthLink/Medical-Objects, SMS) is a clearly
+  # labelled mock behind a real interface, since no sandbox credentials exist
+  # for any of them in this build.
   # ---------------------------------------------------------------------------
 
   identity-access:
@@ -163,11 +166,21 @@ services:
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
+      EMAIL_FROM: no-reply@referralplatform.example.au
+      OTP_HASH_SECRET: change-me-in-local-env
+      # Activation link is opened in the patient's own browser, outside the compose
+      # network — must be the host-published patient-web port, not the internal
+      # "patient-web" hostname.
+      ACTIVATION_LINK_BASE_URL: http://localhost:3102/activate
+      DIRECTORY_SERVICE_URL: http://directory:3006
+      IDENTITY_ACCESS_SERVICE_URL: http://identity-access:3001
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
       mailhog: { condition: service_started }
+      identity-access: { condition: service_started }
+      directory: { condition: service_started }
 
   gp-authorisation:
     build: { context: ., dockerfile: services/gp-authorisation/Dockerfile }
@@ -179,6 +192,7 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=gp_authorisation
       KEYCLOAK_CLIENT_ID: gp-authorisation-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      STEP_UP_ACR: passkey
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -194,10 +208,13 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=consent_security
       KEYCLOAK_CLIENT_ID: consent-security-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      GP_AUTHORISATION_SERVICE_URL: http://gp-authorisation:3003
+      STEP_UP_ACR: passkey
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      gp-authorisation: { condition: service_started }
 
   referral:
     build: { context: ., dockerfile: services/referral/Dockerfile }
@@ -209,11 +226,14 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=referral
       KEYCLOAK_CLIENT_ID: referral-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      GP_AUTHORISATION_SERVICE_URL: http://gp-authorisation:3003
+      GP_AUTHORISATION_FAIL_OPEN: 'false'
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
       audit-log: { condition: service_started }
+      gp-authorisation: { condition: service_started }
 
   directory:
     build: { context: ., dockerfile: services/directory/Dockerfile }
@@ -225,10 +245,21 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=directory
       KEYCLOAK_CLIENT_ID: directory-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      # HealthPathways/HealthLink/Medical-Objects/Direct-Delivery are all MOCK
+      # clients in this build (see BUILD_LOG/directory.md) — values below match
+      # each mock's documented default.
+      HEALTHPATHWAYS_UNAVAILABLE_PHNS: ''
+      SECURE_MESSAGING_DEFAULT_VENDOR: healthlink
+      HEALTHLINK_MOCK_FAILURE_RATE: '0'
+      MEDICAL_OBJECTS_MOCK_FAILURE_RATE: '0'
+      DIRECT_DELIVERY_MOCK_FAILURE_RATE: '0'
+      NOTIFICATION_SERVICE_URL: http://notification:3010
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      audit-log: { condition: service_started }
+      notification: { condition: service_started }
 
   booking:
     build: { context: ., dockerfile: services/booking/Dockerfile }
@@ -240,11 +271,13 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=booking
       KEYCLOAK_CLIENT_ID: booking-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      REFERRAL_SERVICE_URL: http://referral:3005
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
       audit-log: { condition: service_started }
+      referral: { condition: service_started }
 
   specialist-review:
     build: { context: ., dockerfile: services/specialist-review/Dockerfile }
@@ -257,10 +290,16 @@ services:
       KEYCLOAK_CLIENT_ID: specialist-review-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
       FHIR_GATEWAY_URL: http://fhir-gateway:3013
+      REFERRAL_SERVICE_URL: http://referral:3005
+      # rule_based needs no external API; llm needs LLM_API_KEY/LLM_API_URL, which
+      # this build has no credentials for (see BUILD_LOG/specialist-review.md).
+      EXTRACTION_PROVIDER: rule_based
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      referral: { condition: service_started }
+      fhir-gateway: { condition: service_started }
 
   followup-recall:
     build: { context: ., dockerfile: services/followup-recall/Dockerfile }
@@ -272,10 +311,12 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=followup_recall
       KEYCLOAK_CLIENT_ID: followup-recall-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      CONSENT_SECURITY_SERVICE_URL: http://consent-security:3004
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      consent-security: { condition: service_started }
 
   notification:
     build: { context: ., dockerfile: services/notification/Dockerfile }
@@ -291,7 +332,9 @@ services:
       # activation email goes through mailhog instead. See modules-and-requirements.md.
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
+      EMAIL_FROM: no-reply@referralplatform.example.au
       SMS_PROVIDER: mock
+      PUSH_PROVIDER: mock
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -308,11 +351,16 @@ services:
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=admin_console
       KEYCLOAK_CLIENT_ID: admin-console-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+      ONBOARDING_ACCOUNT_SERVICE_URL: http://onboarding-account:3002
+      CONSENT_SECURITY_SERVICE_URL: http://consent-security:3004
+      STEP_UP_ACR: passkey
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       keycloak: { condition: service_healthy }
       audit-log: { condition: service_started }
+      onboarding-account: { condition: service_started }
+      consent-security: { condition: service_started }
 
   audit-log:
     build: { context: ., dockerfile: services/audit-log/Dockerfile }
@@ -330,7 +378,17 @@ services:
       IMMUDB_USERNAME: immudb
       IMMUDB_PASSWORD: change-me-in-local-env
       IMMUDB_DATABASE: audit_log
-      NASH_SIGNING_KEY_PATH: /run/secrets/local-dev-only-nash-key.pem
+      # NOTE: previously pointed at /run/secrets/local-dev-only-nash-key.pem, but
+      # this compose file defines no `secrets:` for this service, so that path
+      # doesn't exist and isn't writable — MockNashSigner's first-run keygen would
+      # fail (exactly the risk BUILD_LOG/audit-log.md flagged). Point both MOCK
+      # key materials at a dedicated named volume instead, so the mock KMS
+      # "erasure" state and the mock NASH keypair both survive a container
+      # recreate (`docker compose down` without `-v`).
+      NASH_SIGNING_KEY_PATH: /keys/local-dev-only-nash-key.pem
+      KMS_MOCK_KEYSTORE_PATH: /keys/local-dev-only-kms-keystore.json
+    volumes:
+      - audit-log-keys:/keys
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -345,8 +403,26 @@ services:
     ports: ['3013:3013']
     environment:
       HI_SERVICE_BASE_URL: https://hi-service.example.gov.au
-      NASH_SIGNING_KEY_PATH: /run/secrets/local-dev-only-nash-key.pem
+      HI_SERVICE_MODE: block
+      # See services/audit-log's equivalent fix above — /run/secrets isn't mounted
+      # in this compose file, so a writable in-container path is used instead.
+      NASH_SIGNING_KEY_PATH: /app/keys/local-dev-only-nash-key.pem
+      NASH_MODE: block
       MHR_BASE_URL: https://mhr.example.gov.au
+      MHR_MODE: block
+      # Previously missing entirely — every other service gets these via the
+      # node-service-env anchor, but that's Node-specific so this Spring Boot
+      # service needs them spelled out. Values match infra/keycloak/realm-export.json's
+      # (now-added) fhir-gateway-service client — see BUILD_LOG/fhir-gateway.md.
+      AUDIT_LOG_SERVICE_URL: http://audit-log:3012
+      KEYCLOAK_ISSUER: http://keycloak:8080/realms/referralplatform
+      KEYCLOAK_CLIENT_ID: fhir-gateway-service
+      KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
+    volumes:
+      - fhir-gateway-keys:/app/keys
+    depends_on:
+      keycloak: { condition: service_healthy }
+      audit-log: { condition: service_started }
 
   # ---------------------------------------------------------------------------
   # Apps (apps/*) — the three Next.js web surfaces + the Expo patient-mobile app.
@@ -358,13 +434,34 @@ services:
     ports: ['3100:3100']
     environment:
       NODE_ENV: development
+      # NOTE (see BUILD_LOG/gp-portal.md): these NEXT_PUBLIC_* values are read by
+      # the *browser*, which runs on the host, not inside the compose network —
+      # they must stay as published host ports (http://localhost:<port>), never
+      # the internal service hostnames. They're also only actually baked into the
+      # client bundle if apps/gp-portal/Dockerfile's build stage sees them (it
+      # currently doesn't pass build args — see known gaps in the final report);
+      # every app's own lib/api/config.ts already falls back to these same
+      # localhost defaults, so this block is set for explicitness/completeness
+      # per this pass's brief, not because the app was broken without it.
       NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
+      NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:3002
+      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
+      NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
       NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
+      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
       NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: gp-portal
+      NEXT_PUBLIC_APP_BASE_URL: http://localhost:3100
     depends_on:
       - identity-access
-      - referral
+      - onboarding-account
       - gp-authorisation
+      - consent-security
+      - referral
+      - directory
+      - followup-recall
       - notification
 
   specialist-portal:
@@ -373,15 +470,23 @@ services:
     ports: ['3101:3101']
     environment:
       NODE_ENV: development
+      # See gp-portal's equivalent block above for why these are localhost, not
+      # the internal service hostnames.
       NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
       NEXT_PUBLIC_SPECIALIST_REVIEW_URL: http://localhost:3008
       NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
       NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: specialist-portal
     depends_on:
       - identity-access
       - specialist-review
       - booking
       - directory
+      - referral
+      - followup-recall
 
   patient-web:
     build: { context: ., dockerfile: apps/patient-web/Dockerfile }
@@ -389,15 +494,30 @@ services:
     ports: ['3102:3102']
     environment:
       NODE_ENV: development
+      # See gp-portal's equivalent block above for why these are localhost, not
+      # the internal service hostnames.
       NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
       NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:3002
+      NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
       NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
+      NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
+      NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
+      NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:3009
+      NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
       NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: patient-web
+      NEXT_PUBLIC_APP_BASE_URL: http://localhost:3102
     depends_on:
       - identity-access
       - onboarding-account
+      - gp-authorisation
       - consent-security
       - referral
+      - directory
+      - booking
+      - followup-recall
+      - notification
 
   patient-mobile:
     # Expo/React Native has no meaningful production Docker image (it ships to
@@ -415,15 +535,27 @@ services:
       - '8081:8081' # Metro bundler
       - '19000:19000' # Expo dev tools
     environment:
+      EXPO_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:3001
       EXPO_PUBLIC_ONBOARDING_ACCOUNT_SERVICE_URL: http://localhost:3002
+      EXPO_PUBLIC_GP_AUTHORISATION_URL: http://localhost:3003
+      EXPO_PUBLIC_CONSENT_SECURITY_URL: http://localhost:3004
       EXPO_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:3005
+      EXPO_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:3006
+      EXPO_PUBLIC_BOOKING_SERVICE_URL: http://localhost:3007
+      EXPO_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:3010
       EXPO_PUBLIC_KEYCLOAK_ISSUER: http://localhost:8180/realms/referralplatform
+      EXPO_PUBLIC_KEYCLOAK_CLIENT_ID: patient-mobile
     command: sh -c "npm install --workspace=apps/patient-mobile --include-workspace-root && npm run start -w apps/patient-mobile -- --web"
     depends_on:
       - identity-access
       - onboarding-account
+      - referral
+      - directory
+      - booking
 
 volumes:
   postgres-data:
   redis-data:
   immudb-data:
+  audit-log-keys:
+  fhir-gateway-keys:

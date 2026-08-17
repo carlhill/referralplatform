@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/consent-security-service",
   "version": "0.1.0",
-  "description": "Consent & Security Service — the consent page, linked-GP management, carer re-attestation, raise-a-concern triage, deceased-patient flag/freeze workflow.",
+  "description": "Consent & Security Service \u2014 the consent page, linked-GP management, carer re-attestation, raise-a-concern triage, deceased-patient flag/freeze workflow.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

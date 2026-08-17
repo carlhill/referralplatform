@@ -17,6 +17,7 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/audit-client/package.json packages/audit-client/package.json
+COPY packages/audit-outbox/package.json packages/audit-outbox/package.json
 COPY packages/auth-client/package.json packages/auth-client/package.json
 COPY services/gp-authorisation/package.json services/gp-authorisation/package.json
 COPY certs ./certs
@@ -32,7 +33,7 @@ COPY . .
 # This service's PrismaService needs the generated @prisma/client types (see
 # prisma/schema.prisma's GpLink/AuditOutbox models) before `tsc` can build it.
 RUN npm run prisma:generate -w services/gp-authorisation
-RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/gp-authorisation
+RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/audit-outbox -w packages/auth-client -w services/gp-authorisation
 
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production

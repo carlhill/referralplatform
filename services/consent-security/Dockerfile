@@ -17,6 +17,7 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/audit-client/package.json packages/audit-client/package.json
+COPY packages/audit-outbox/package.json packages/audit-outbox/package.json
 COPY packages/auth-client/package.json packages/auth-client/package.json
 COPY services/consent-security/package.json services/consent-security/package.json
 COPY certs ./certs
@@ -34,7 +35,7 @@ COPY . .
 # DeceasedFlag/AccessRequest/PublishedEvent/AuditOutbox models) before `tsc`
 # can build it.
 RUN npm run prisma:generate -w services/consent-security
-RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/consent-security
+RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/audit-outbox -w packages/auth-client -w services/consent-security
 
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production

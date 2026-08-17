@@ -34,11 +34,6 @@ export type AuditEventType =
   | 'patient.deceased.flagged'
   | 'access.request.granted'
   | 'access.request.denied'
-  // Onboarding & Account and Admin Console were already emitting these, but they
-  // were never added here or to audit-log's runtime whitelist, so the Audit Log
-  // Service rejected every one with 400 and their outbox rows retried forever —
-  // i.e. real consent- and identity-relevant actions were silently never recorded.
-  // Found 2026-08-17; see BUILD_LOG/local-build-fixes.md.
   | 'account.activation.branch_selected'
   | 'account.activation.identity_verified'
   | 'account.otp.sent'
@@ -49,17 +44,32 @@ export type AuditEventType =
   | 'gp_practice.hpio_verification_failed'
   | 'gp_practice.compliance_checklist_acknowledged'
   | 'practice_onboarding_case.opened'
-  // IAM/credential-security events. identity-access was already emitting the first
-  // four via an `asAuditEventType` cast whose comment claimed the Audit Log Service
-  // "accepts type as an opaque string over the wire" — it does not, it validates
-  // against a strict whitelist, so every one was rejected with 400. Worse than the
-  // outbox cases: these are direct calls, so they were dropped outright rather than
-  // retried. Found 2026-08-17.
   | 'identity.passkey.revoked'
   | 'identity.passkey.reenrolment_required'
   | 'identity.social_link.created'
   | 'identity.social_link.removed'
-  | 'identity.bootstrap_password.removed';
+  | 'identity.bootstrap_password.removed'
+  | 'message_thread.created'
+  | 'message_thread.message_posted'
+  | 'message_thread.participant_added'
+  | 'message_thread.resolved'
+  | 'account.activation.link.sent'
+  | 'account.activation.link.expired'
+  | 'account.activation.identity_verification_failed'
+  | 'account.activation.identity_locked'
+  | 'account.otp.failed'
+  | 'account.otp.locked'
+  | 'account.passkey_enrolment.prompted'
+  | 'carer.email_verified'
+  | 'carer.suspected_organisational'
+  | 'specialist.registration_requested'
+  | 'specialist.ahpra_verified'
+  | 'specialist.ahpra_verification_failed'
+  | 'specialist.hpii_resolved'
+  | 'specialist.nash_credential_provisioned'
+  | 'specialist.directory_profile_created'
+  | 'specialist.directory_profile_creation_failed'
+  | 'specialist.econsult_opt_in_changed';
 
 /**
  * The event written to the Audit Log Service — see audit-log-architecture-decision.md.

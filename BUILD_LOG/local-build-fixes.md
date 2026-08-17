@@ -477,3 +477,46 @@ noticing; that logic belongs in a shared package. And removing the `: OutboxRow[
 annotation from the poll query silently changed `row.actor`'s type from `unknown` to
 Prisma's `JsonValue`, which broke an existing `as ActorRef` cast in eight services —
 caught by building two representative services first rather than all eleven at once.
+
+## Relay extracted into `@referralplatform/audit-outbox` (2026-08-17)
+
+The relay was copy-pasted into eleven services and had already drifted into two
+different broken retry policies — that duplication is why a single policy decision cost
+eleven edits, eleven migrations and eleven rebuilds the previous round.
+
+New package `packages/audit-outbox` holds the parts worth sharing:
+`relayPendingAuditEvents()` (poll, publish, backoff bookkeeping), `enqueueAuditEvent()`,
+the retry constants, and the structural Prisma/logger types. It is deliberately
+**framework-agnostic** — scheduling, DI and the skip-if-already-running guard stay in
+each service's ~50-line NestJS wrapper — so the package needs no NestJS dependency and
+the logic is directly unit-testable, which it never was while embedded in eleven Nest
+services. Seven unit tests now cover it, including an explicit regression test that a
+row failing 500 times is still retried rather than abandoned.
+
+Each service's `audit-outbox.types.ts` is now a re-export of the package's types, so
+there is one definition rather than eleven near-copies.
+
+**The extraction immediately paid for itself.** Making the shared `EnqueueAuditEventInput`
+require a real `AuditEventType` turned a whole class of silent runtime failure into
+compile errors: **35 event types** that services declared in local extension unions and
+cast at the call site had never been added to the canonical union, and therefore were
+absent from audit-log's runtime whitelist and rejected with 400. The earlier fixes had
+only caught the fifteen that happened to have been *emitted during testing* — these are
+the rest, found by the type system rather than by inspecting a table:
+`account.otp.failed`, `account.otp.locked`, `account.activation.identity_locked`,
+`carer.email_verified`, `carer.suspected_organisational`, every `specialist.*`
+onboarding event (AHPRA verification, HPI-I resolution, NASH provisioning), and all four
+`message_thread.*` events from `notification`. All 62 types are now registered in both
+the union and the whitelist, verified by the contract test.
+
+That is the real argument for the extraction: a shared, strictly-typed boundary makes
+producer/consumer drift a build failure instead of an audit gap nobody notices.
+
+**A self-inflicted lesson worth recording.** Two of the scripts used here parsed the
+union with `/export type AuditEventType\s*=(.*?);/` and *then* stripped comments — but a
+comment inside the union contained "Found 2026-08-17; see BUILD_LOG...", so the match
+truncated at that semicolon. The first time this cost a false test failure; the second
+time it silently re-added 14 duplicate members and corrupted the declaration, which
+took a full rebuild of the block from the whitelist to repair. Strip comments *before*
+parsing, and prefer regenerating a list from a known-good source over patching it in
+place. The contract test's duplicate check is what caught it.

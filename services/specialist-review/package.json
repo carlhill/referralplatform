@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/specialist-review-service",
   "version": "0.1.0",
-  "description": "Specialist Review Service — AI-assisted structured extraction for specialists, eConsult-style async advice, pre-visit pathology/imaging requests.",
+  "description": "Specialist Review Service \u2014 AI-assisted structured extraction for specialists, eConsult-style async advice, pre-visit pathology/imaging requests.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

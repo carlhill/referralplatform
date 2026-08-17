@@ -17,6 +17,7 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/audit-client/package.json packages/audit-client/package.json
+COPY packages/audit-outbox/package.json packages/audit-outbox/package.json
 COPY packages/auth-client/package.json packages/auth-client/package.json
 COPY services/specialist-review/package.json services/specialist-review/package.json
 COPY certs ./certs
@@ -30,7 +31,7 @@ RUN npm install -g npm@11 && \
     npm install --workspaces --include-workspace-root
 COPY . .
 RUN npm run prisma:generate -w services/specialist-review
-RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/auth-client -w services/specialist-review
+RUN npm run build -w packages/shared-types -w packages/audit-client -w packages/audit-outbox -w packages/auth-client -w services/specialist-review
 
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { enqueueAuditEvent } from '@referralplatform/audit-outbox';
 import type { AuditOutboxWriter, EnqueueAuditEventInput } from './audit-outbox.types';
 
 /**
@@ -24,16 +25,7 @@ export class AuditOutboxService {
    *   silently lost.
    */
   async enqueue(writer: AuditOutboxWriter, input: EnqueueAuditEventInput): Promise<void> {
-    await writer.auditOutbox.create({
-      data: {
-        type: input.type,
-        actor: input.actor as unknown as Record<string, unknown>,
-        subjectType: input.subject.type,
-        subjectId: input.subject.id,
-        payload: input.payload,
-        occurredAt: input.occurredAt ?? new Date(),
-      },
-    });
+    await enqueueAuditEvent(writer, input);
   }
 
   /** Convenience overload for call sites outside any transaction. */

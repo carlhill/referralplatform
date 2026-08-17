@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/admin-console-service",
   "version": "0.1.0",
-  "description": "Admin/Ops Console (backend) — AHPRA/WWCC manual verification review, deceased-patient access-request review, PHN/practice onboarding, audit-log query access.",
+  "description": "Admin/Ops Console (backend) \u2014 AHPRA/WWCC manual verification review, deceased-patient access-request review, PHN/practice onboarding, audit-log query access.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

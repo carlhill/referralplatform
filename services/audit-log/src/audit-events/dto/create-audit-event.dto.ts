@@ -67,6 +67,29 @@ export const AUDIT_EVENT_TYPES = [
   'identity.social_link.created',
   'identity.social_link.removed',
   'identity.bootstrap_password.removed',
+  // See the note in packages/shared-types/src/audit-event.ts — producer-declared
+  // types that were being rejected with 400 because they never reached this list.
+  'message_thread.created',
+  'message_thread.message_posted',
+  'message_thread.participant_added',
+  'message_thread.resolved',
+  'account.activation.link.sent',
+  'account.activation.link.expired',
+  'account.activation.identity_verification_failed',
+  'account.activation.identity_locked',
+  'account.otp.failed',
+  'account.otp.locked',
+  'account.passkey_enrolment.prompted',
+  'carer.email_verified',
+  'carer.suspected_organisational',
+  'specialist.registration_requested',
+  'specialist.ahpra_verified',
+  'specialist.ahpra_verification_failed',
+  'specialist.hpii_resolved',
+  'specialist.nash_credential_provisioned',
+  'specialist.directory_profile_created',
+  'specialist.directory_profile_creation_failed',
+  'specialist.econsult_opt_in_changed',
 ] as const;
 
 /** The literal union of what this whitelist actually contains, for the checks below. */

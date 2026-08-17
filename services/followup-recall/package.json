@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/followup-recall-service",
   "version": "0.1.0",
-  "description": "Follow-up & Recall Service — Follow-up Plan management, multi-channel reminder scheduling, test-completion detection, deceased-patient reminder suppression.",
+  "description": "Follow-up & Recall Service \u2014 Follow-up Plan management, multi-channel reminder scheduling, test-completion detection, deceased-patient reminder suppression.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

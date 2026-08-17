@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/directory-service",
   "version": "0.1.0",
-  "description": "Directory Service — the specialist/GP directory: NHSD sync, self-registered profiles, HealthPathways Pathway Link API integration.",
+  "description": "Directory Service \u2014 the specialist/GP directory: NHSD sync, self-registered profiles, HealthPathways Pathway Link API integration.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

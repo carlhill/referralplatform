@@ -1,7 +1,7 @@
 {
   "name": "@referralplatform/notification-service",
   "version": "0.1.0",
-  "description": "Notification Service — push/SMS/email fan-out and the referral-scoped secure message thread. SMS is mocked; OTP/account-activation email is real for local dev.",
+  "description": "Notification Service \u2014 push/SMS/email fan-out and the referral-scoped secure message thread. SMS is mocked; OTP/account-activation email is real for local dev.",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -25,6 +25,7 @@
     "@nestjs/schedule": "^6.0.0",
     "@prisma/client": "^6.19.0",
     "@referralplatform/audit-client": "*",
+    "@referralplatform/audit-outbox": "*",
     "@referralplatform/auth-client": "*",
     "@referralplatform/shared-types": "*",
     "class-transformer": "^0.5.1",

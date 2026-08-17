@@ -1,5 +1,19 @@
 # Test results
 
+Two tiers:
+
+| Tier | Command | Needs | Result |
+| --- | --- | --- | --- |
+| Unit / in-process | `npm run test --workspaces` | nothing running | **585 tests, 0 failed** |
+| Integration (live stack) | `npm run test:integration` | docker-compose stack up | **14 tests, 0 failed** |
+| Static validators | `npm run validate` | nothing running | realm + outbox schema OK |
+
+The integration tier is new and exists because every serious bug found on 2026-08-17
+was invisible to the 577 unit tests that were green throughout — each lived in a seam
+between components. See [`integration/README.md`](integration/README.md), including
+proof that the suite fails when a regression is reintroduced.
+
+
 Last run: **2026-08-17 22:49** — `npm run test --workspaces --if-present`
 
 **113 suites / 577 tests, 0 failed.** Exit code 0 under both `TZ=Australia/Sydney` and `TZ=UTC` (identical results in each).

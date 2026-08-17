@@ -1,0 +1,17 @@
+{
+  "name": "@referralplatform/integration",
+  "version": "0.1.0",
+  "description": "Integration tests that run against the REAL running docker-compose stack. See integration/README.md.",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "test:integration": "jest --runInBand"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.16.11",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.12",
+    "typescript": "^5.6.3"
+  }
+}

@@ -10,7 +10,8 @@
   "workspaces": [
     "services/*",
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "integration"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
@@ -21,7 +22,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "validate:realm": "node infra/keycloak/validate-realm-export.mjs",
     "validate:outbox": "node infra/validate-outbox-schemas.mjs",
-    "validate": "npm run validate:realm && npm run validate:outbox"
+    "validate": "npm run validate:realm && npm run validate:outbox",
+    "test:integration": "npm run test:integration -w integration"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

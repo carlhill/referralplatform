@@ -770,7 +770,7 @@
     {
       "id": "b6f10000-0000-4000-8000-0000000000c1",
       "alias": "clinician-browser",
-      "description": "Browser login for GP/specialist principals - passkey is the only steady-state credential (AAL2/AAL3, see identity-security-recommendations.md section 6). A password is accepted ONLY as a first-login bootstrap for a clinician who has no passkey yet, and the webauthn-register-passwordless required action then forces enrolment; the bootstrap password must be removed once enrolled, after which the password branch is no longer selectable and only the passkey remains.",
+      "description": "Browser login for GP/specialist principals. Passkey is the only steady-state credential (AAL2/AAL3); a password is accepted ONLY as a first-login bootstrap and is removed on enrolment. See BUILD_LOG/local-build-fixes.md.",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -829,7 +829,7 @@
     },
     {
       "alias": "clinician-browser Credential",
-      "description": "Passkey, or password as a first-login bootstrap. Both are ALTERNATIVE: Keycloak only offers the passkey branch to a user who actually has a passkey credential, and only offers the password branch to a user who actually has a password. Keeping clinicians password-less after enrolment is therefore what enforces passkey-only login - it is a provisioning responsibility, not something this flow can express on its own.",
+      "description": "Passkey, or password as a first-login bootstrap. Both ALTERNATIVE: Keycloak only offers a branch the user holds a credential for, so keeping clinicians password-less after enrolment is what enforces passkey-only login.",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -1509,5 +1509,29 @@
         }
       ]
     }
-  ]
+  ],
+  "smtpServer": {
+    "host": "mailhog",
+    "port": "1025",
+    "from": "noreply@referralplatform.local",
+    "fromDisplayName": "ReferralPlatform (local dev)",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "name": "declarative-user-profile",
+        "providerId": "declarative-user-profile",
+        "subType": null,
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"email\", \"displayName\": \"${email}\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"principal_type\", \"displayName\": \"Principal type\", \"validations\": {}, \"annotations\": {}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}, \"multivalued\": false}], \"groups\": [{\"name\": \"user-metadata\", \"displayHeader\": \"User metadata\", \"displayDescription\": \"Attributes, which refer to user metadata\"}]}"
+          ]
+        }
+      }
+    ]
+  }
 }

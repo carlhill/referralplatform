@@ -288,7 +288,32 @@ user as signed in. Keycloak logs `error="already_logged_in"` with
 required-action redirect chain) bounces back to `/callback` without a `code`. The
 handler should recognise `error=already_logged_in` and redirect home.
 
-## 8. [GAP] Realm state that exists only live, and will vanish on a fresh import
+## 8. ~~[GAP] Realm state that exists only live~~ — **FIXED 2026-08-17**
+
+`smtpServer` (→ mailhog) and the declarative User Profile declaring `principal_type`
+are now both in `realm-export.json`.
+
+Note `principal_type` had been **lost entirely** — it was applied live in an earlier
+session and wiped by one of the realm recreations since, so the silent
+attribute-stripping bug was live again. Restored and re-verified: a user created via
+the Admin API with `attributes.principal_type` now comes back with
+`{'principal_type': ['gp']}` instead of having it silently dropped.
+
+**While verifying this I found the checked-in realm could not be imported at all.**
+Two authentication-flow descriptions written during the clinician-login fix were 466
+and 416 characters against Keycloak's `VARCHAR(255)` column, so a clean deployment
+would have failed on import. Both shortened. Verified by importing the file into a
+throwaway Keycloak with an empty database — `Realm 'referralplatform' imported /
+Import finished successfully` — and confirming SMTP, the `principal_type` attribute,
+gp-portal's `20020` redirect URI, all 11 client scopes and the clinician flow structure
+all survive.
+
+Added `npm run validate:realm` (`infra/keycloak/validate-realm-export.mjs`) to catch
+this class statically, since Keycloak's own validation is fail-fast, sequential, and
+skipped entirely when the realm already exists — so a broken file stays invisible until
+someone does a clean deploy. Verified it flags the exact regression I had introduced.
+
+## 8-original. [ORIGINAL ANALYSIS — kept for context]
 
 `realm-export.json` is now the source of truth again (Keycloak has a persistent volume
 as of this session), but two things were applied **live via the Admin API only** and

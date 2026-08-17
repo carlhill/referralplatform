@@ -1,102 +1,71 @@
+jest.mock('@referralplatform/audit-outbox', () => ({
+  relayPendingAuditEvents: jest.fn(),
+}));
+
 import { ConfigService } from '@nestjs/config';
+import { relayPendingAuditEvents } from '@referralplatform/audit-outbox';
 import { AuditOutboxRelayService } from './audit-outbox-relay.service';
 
-class FakePrisma {
-  rows: Array<{
-    id: string;
-    type: string;
-    actor: unknown;
-    subjectType: string;
-    subjectId: string;
-    payload: unknown;
-    occurredAt: Date;
-    publishedAt: Date | null;
-  }> = [];
+const mockRelay = relayPendingAuditEvents as jest.Mock;
 
-  auditOutbox = {
-    findMany: async () => this.rows.filter((r) => r.publishedAt === null),
-    update: async ({ where, data }: { where: { id: string }; data: { publishedAt: Date } }) => {
-      const row = this.rows.find((r) => r.id === where.id);
-      if (row) row.publishedAt = data.publishedAt;
-      return row;
-    },
-  };
-}
-
-describe('AuditOutboxRelayService', () => {
-  function makeService(prisma: FakePrisma) {
+/**
+ * This spec deliberately covers only what the wrapper itself owns: scheduling and the
+ * skip-if-already-running guard.
+ *
+ * Publishing, retry and backoff behaviour used to be tested here too — in four
+ * near-identical copies across services, which is exactly the duplication that let the
+ * relays drift into two different broken retry policies without anyone noticing. That
+ * logic now lives in `@referralplatform/audit-outbox` and is tested once, properly,
+ * there (including a regression test that a long-failing row is never abandoned).
+ * Do not reintroduce copies of those assertions here.
+ */
+describe('AuditOutboxRelayService (scheduling wrapper)', () => {
+  function makeService() {
     const config = new ConfigService({
       AUDIT_LOG_SERVICE_URL: 'http://audit-log.local',
       KEYCLOAK_ISSUER: 'http://keycloak.local/realms/referralplatform',
       KEYCLOAK_CLIENT_ID: 'gp-authorisation-service',
       KEYCLOAK_CLIENT_SECRET: 'secret',
     });
-    return new AuditOutboxRelayService(prisma as any, config);
+    return new AuditOutboxRelayService({} as any, config);
   }
 
-  it('publishes every unpublished row and marks it published', async () => {
-    const prisma = new FakePrisma();
-    prisma.rows.push({
-      id: 'row-1',
-      type: 'gp.linked',
-      actor: { principalType: 'system', id: 'x' },
-      subjectType: 'GPLink',
-      subjectId: 'link-1',
-      payload: {},
-      occurredAt: new Date(),
-      publishedAt: null,
-    });
+  beforeEach(() => mockRelay.mockReset());
 
-    const service = makeService(prisma);
-    const record = jest.fn().mockResolvedValue({});
-    (service as any).auditClient = { record };
+  it('delegates a tick to the shared relay implementation', async () => {
+    mockRelay.mockResolvedValue(undefined);
 
-    await service.relayPending();
+    await makeService().relayPendingEvents();
 
-    expect(record).toHaveBeenCalledTimes(1);
-    expect(record).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'gp.linked', subject: { type: 'GPLink', id: 'link-1' } }),
-    );
-    expect(prisma.rows[0].publishedAt).not.toBeNull();
+    expect(mockRelay).toHaveBeenCalledTimes(1);
+    const args = mockRelay.mock.calls[0][0];
+    expect(args).toHaveProperty('prisma');
+    expect(args).toHaveProperty('auditClient');
+    expect(args).toHaveProperty('logger');
   });
 
-  it('leaves a row unpublished and does not throw if the Audit Log Service call fails', async () => {
-    const prisma = new FakePrisma();
-    prisma.rows.push({
-      id: 'row-2',
-      type: 'gp.link.revoked',
-      actor: { principalType: 'patient', id: 'p1' },
-      subjectType: 'GPLink',
-      subjectId: 'link-2',
-      payload: {},
-      occurredAt: new Date(),
-      publishedAt: null,
-    });
+  it('skips a tick while the previous one is still in flight', async () => {
+    let release: () => void = () => undefined;
+    mockRelay.mockImplementation(() => new Promise<void>((resolve) => (release = resolve)));
+    const service = makeService();
 
-    const service = makeService(prisma);
-    (service as any).auditClient = { record: jest.fn().mockRejectedValue(new Error('audit-log unreachable')) };
+    const first = service.relayPendingEvents();
+    await service.relayPendingEvents(); // overlapping tick — must be a no-op
+    release();
+    await first;
 
-    await expect(service.relayPending()).resolves.toBeUndefined();
-    expect(prisma.rows[0].publishedAt).toBeNull();
+    expect(mockRelay).toHaveBeenCalledTimes(1);
   });
 
-  it('skips already-published rows', async () => {
-    const prisma = new FakePrisma();
-    prisma.rows.push({
-      id: 'row-3',
-      type: 'gp.link.declined',
-      actor: { principalType: 'system', id: 'x' },
-      subjectType: 'GPLink',
-      subjectId: 'link-3',
-      payload: {},
-      occurredAt: new Date(),
-      publishedAt: new Date(),
-    });
-    const service = makeService(prisma);
-    const record = jest.fn();
-    (service as any).auditClient = { record };
+  it('swallows a failed tick so the schedule keeps running', async () => {
+    mockRelay.mockRejectedValue(new Error('audit log unreachable'));
+    const service = makeService();
 
-    await service.relayPending();
-    expect(record).not.toHaveBeenCalled();
+    await expect(service.relayPendingEvents()).resolves.toBeUndefined();
+
+    // and the guard is released, so the next tick still runs
+    mockRelay.mockResolvedValue(undefined);
+    await service.relayPendingEvents();
+    expect(mockRelay).toHaveBeenCalledTimes(2);
   });
 });

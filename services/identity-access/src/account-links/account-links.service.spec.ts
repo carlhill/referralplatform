@@ -39,8 +39,9 @@ function makeService(configOverrides: Record<string, string> = {}) {
     listFederatedIdentities: jest.fn(),
     removeFederatedIdentity: jest.fn(),
   } as unknown as jest.Mocked<KeycloakAdminService>;
-  const service = new AccountLinksService(prisma, keycloakAdmin, makeConfig(configOverrides));
-  (service as any).auditClient = { record: jest.fn() };
+  // Audit events go to the outbox now rather than straight to the Audit Log Service.
+  const auditOutbox = { enqueueStandalone: jest.fn(), enqueue: jest.fn() } as any;
+  const service = new AccountLinksService(prisma, keycloakAdmin, makeConfig(configOverrides), auditOutbox);
   return { service, prisma, keycloakAdmin };
 }
 
@@ -128,7 +129,7 @@ describe('AccountLinksService', () => {
       const { service, keycloakAdmin } = makeService();
       await service.unlink(patient, 'google');
       expect(keycloakAdmin.removeFederatedIdentity).toHaveBeenCalledWith('patient-1', 'google');
-      expect((service as any).auditClient.record).toHaveBeenCalled();
+      expect((service as any).auditOutbox.enqueueStandalone).toHaveBeenCalled();
     });
   });
 

@@ -520,3 +520,41 @@ time it silently re-added 14 duplicate members and corrupted the declaration, wh
 took a full rebuild of the block from the whitelist to repair. Strip comments *before*
 parsing, and prefer regenerating a list from a known-good source over patching it in
 place. The contract test's duplicate check is what caught it.
+
+## Full test suite: 577 tests green, and what it took to get a trustworthy run (2026-08-17)
+
+`npm run test --workspaces` — **113 suites / 577 tests, all passing** (exit 0).
+
+Getting a *meaningful* result took three attempts, and the first two were misleading in
+ways worth recording:
+
+1. **Run inside a service image → 25 suites "failed".** Every service image installs
+   only its own dependency subset (the COPY-package-json-first caching pattern), so
+   other services' deps — `@nestjs/schedule`, `nodemailer` — simply are not there. The
+   whole monorepo suite cannot be run from one service's image. Not a real failure.
+2. **Run on the host → module-resolution failures everywhere.** Workspace packages
+   resolve via `main: dist/index.js`, and nothing had been built on the host. Worse, a
+   stale `tsconfig.tsbuildinfo` made `tsc` emit only the one file I had edited, leaving
+   a *partial* `dist` that produced a confusing "has no exported member 'ActorRef'".
+   `rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo` before building fixed it.
+   The host also needed `npm install` (to link the newly-added `audit-outbox`
+   workspace) and `npm run prisma:generate --workspaces` (without generated clients,
+   `PrismaService` has no `auditOutbox` model and `$transaction` is untyped).
+
+**Two real regressions from the outbox extraction, now fixed.** Changing constructors
+without updating their specs: `PasskeysService` and `AccountLinksService` take an
+`AuditOutboxService` where they previously took `ConfigService`/built an `AuditClient`,
+and both specs still constructed the old shape and asserted on `auditClient.record`.
+Updated to inject an outbox double and assert `enqueueStandalone`.
+
+**Four stale relay specs replaced.** `directory`, `gp-authorisation`, `notification` and
+`onboarding-account` each had a near-identical copy of the relay's publish/retry tests —
+one of which asserted the max-attempt cap that was deliberately removed, i.e. it was
+pinning the *old broken policy* in place. That logic now lives in
+`@referralplatform/audit-outbox` and is tested once there; the per-service specs now
+cover only what the wrapper owns (delegation, the skip-if-already-running guard, and
+that a failed tick doesn't wedge the schedule).
+
+**One pre-existing failure found, not fixed** — two `booking` tests assume the runner's
+timezone is UTC and fail on an Australian-timezone machine; see TODO 13. They pass in
+Docker and CI, which is exactly why nobody had noticed.

@@ -324,3 +324,16 @@ and already-verified services get OOM-killed (exit 137) or hang while still appe
 "up". Work on a subset, and see `CLAUDE.md` for the `wsl --shutdown` recovery routine
 and the stale-`wslrelay.exe` port-squatting issue that produces very convincing
 false-positive "the app is broken" symptoms.
+
+## 13. [BUG] Two booking tests assume the runner's timezone is UTC
+
+`MockCalendarClient › only returns free windows within AU clinic hours on weekdays` and
+`BookingService › create — preference matching › auto-confirms the best-matching
+available slot` fail on a machine set to an Australian timezone and pass under
+`TZ=UTC`. Both assert on `getUTCHours()` / absolute UTC instants while the mock builds
+its windows in local time, so "AU clinic hours" only holds when local time *is* UTC.
+
+Pre-existing (untouched since the original build, `d140b5d`), and invisible in CI/Docker
+because those run UTC — but it means the suite fails for any developer in the
+platform's own target market. Fix by pinning the timezone in the booking jest config,
+or by making the mock and its assertions agree on a single timezone.

@@ -1,94 +1,71 @@
+jest.mock('@referralplatform/audit-outbox', () => ({
+  relayPendingAuditEvents: jest.fn(),
+}));
+
 import { ConfigService } from '@nestjs/config';
+import { relayPendingAuditEvents } from '@referralplatform/audit-outbox';
 import { AuditOutboxRelayService } from './audit-outbox-relay.service';
 
-function makeConfig(): ConfigService {
-  return {
-    getOrThrow: (key: string) =>
-      ({
-        KEYCLOAK_ISSUER: 'http://keycloak:8080/realms/referralplatform',
-        KEYCLOAK_CLIENT_ID: 'notification-service',
-        KEYCLOAK_CLIENT_SECRET: 'secret',
-        AUDIT_LOG_SERVICE_URL: 'http://audit-log:3012',
-      })[key],
-    get: () => undefined,
-  } as unknown as ConfigService;
-}
+const mockRelay = relayPendingAuditEvents as jest.Mock;
 
-function makeService(prisma: any) {
-  const service = new AuditOutboxRelayService(prisma, makeConfig());
-  const record = jest.fn();
-  (service as any).auditClient = { record };
-  return { service, record };
-}
+/**
+ * This spec deliberately covers only what the wrapper itself owns: scheduling and the
+ * skip-if-already-running guard.
+ *
+ * Publishing, retry and backoff behaviour used to be tested here too — in four
+ * near-identical copies across services, which is exactly the duplication that let the
+ * relays drift into two different broken retry policies without anyone noticing. That
+ * logic now lives in `@referralplatform/audit-outbox` and is tested once, properly,
+ * there (including a regression test that a long-failing row is never abandoned).
+ * Do not reintroduce copies of those assertions here.
+ */
+describe('AuditOutboxRelayService (scheduling wrapper)', () => {
+  function makeService() {
+    const config = new ConfigService({
+      AUDIT_LOG_SERVICE_URL: 'http://audit-log.local',
+      KEYCLOAK_ISSUER: 'http://keycloak.local/realms/referralplatform',
+      KEYCLOAK_CLIENT_ID: 'notification-service',
+      KEYCLOAK_CLIENT_SECRET: 'secret',
+    });
+    return new AuditOutboxRelayService({} as any, config);
+  }
 
-const pendingRow = {
-  id: 'row_1',
-  type: 'message_thread.created',
-  actor: { principalType: 'gp', id: 'gp1' },
-  subjectType: 'MessageThread',
-  subjectId: 'thread1',
-  payload: {},
-  occurredAt: new Date('2026-08-13T00:00:00Z'),
-  attempts: 0,
-};
+  beforeEach(() => mockRelay.mockReset());
 
-describe('AuditOutboxRelayService', () => {
-  it('relays a pending row to the Audit Log Service and marks it published', async () => {
-    const findMany = jest.fn().mockResolvedValue([pendingRow]);
-    const update = jest.fn();
-    const prisma = { auditOutbox: { findMany, update } };
-    const { service, record } = makeService(prisma);
-    record.mockResolvedValue({});
+  it('delegates a tick to the shared relay implementation', async () => {
+    mockRelay.mockResolvedValue(undefined);
 
-    await service.relayPendingEvents();
+    await makeService().relayPendingEvents();
 
-    expect(record).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'message_thread.created', subject: { type: 'MessageThread', id: 'thread1' } }),
-    );
-    expect(update).toHaveBeenCalledWith({ where: { id: 'row_1' }, data: { publishedAt: expect.any(Date) } });
+    expect(mockRelay).toHaveBeenCalledTimes(1);
+    const args = mockRelay.mock.calls[0][0];
+    expect(args).toHaveProperty('prisma');
+    expect(args).toHaveProperty('auditClient');
+    expect(args).toHaveProperty('logger');
   });
 
-  it('records attempts/lastError and leaves the row unpublished on failure, rather than throwing', async () => {
-    const findMany = jest.fn().mockResolvedValue([pendingRow]);
-    const update = jest.fn();
-    const prisma = { auditOutbox: { findMany, update } };
-    const { service, record } = makeService(prisma);
-    record.mockRejectedValue(new Error('Audit Log Service unreachable'));
+  it('skips a tick while the previous one is still in flight', async () => {
+    let release: () => void = () => undefined;
+    mockRelay.mockImplementation(() => new Promise<void>((resolve) => (release = resolve)));
+    const service = makeService();
+
+    const first = service.relayPendingEvents();
+    await service.relayPendingEvents(); // overlapping tick — must be a no-op
+    release();
+    await first;
+
+    expect(mockRelay).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a failed tick so the schedule keeps running', async () => {
+    mockRelay.mockRejectedValue(new Error('audit log unreachable'));
+    const service = makeService();
 
     await expect(service.relayPendingEvents()).resolves.toBeUndefined();
 
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'row_1' },
-      data: { attempts: { increment: 1 }, lastError: expect.stringContaining('unreachable') },
-    });
-  });
-
-  it('only queries rows that are unpublished and under the max attempt count', async () => {
-    const findMany = jest.fn().mockResolvedValue([]);
-    const prisma = { auditOutbox: { findMany, update: jest.fn() } };
-    const { service } = makeService(prisma);
-
+    // and the guard is released, so the next tick still runs
+    mockRelay.mockResolvedValue(undefined);
     await service.relayPendingEvents();
-
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { publishedAt: null, attempts: { lt: 8 } } }),
-    );
-  });
-
-  it('skips an overlapping tick while a previous relay run is still in flight', async () => {
-    let resolveFirst!: () => void;
-    const findMany = jest
-      .fn()
-      .mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = () => resolve([]))))
-      .mockResolvedValue([]);
-    const prisma = { auditOutbox: { findMany, update: jest.fn() } };
-    const { service } = makeService(prisma);
-
-    const firstTick = service.relayPendingEvents();
-    const secondTick = service.relayPendingEvents();
-    resolveFirst();
-    await Promise.all([firstTick, secondTick]);
-
-    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(mockRelay).toHaveBeenCalledTimes(2);
   });
 });

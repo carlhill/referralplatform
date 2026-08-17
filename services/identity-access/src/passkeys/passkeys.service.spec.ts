@@ -31,9 +31,10 @@ describe('PasskeysService', () => {
       deleteCredential: jest.fn(),
       addRequiredAction: jest.fn(),
     } as unknown as jest.Mocked<KeycloakAdminService>;
-    const service = new PasskeysService(keycloakAdmin, makeConfig());
-    // Swap in a fetch-free audit client stand-in so tests don't hit the network.
-    (service as any).auditClient = { record: jest.fn() };
+    // Audit events go to the outbox now (durable, retried) rather than straight to
+    // the Audit Log Service — see @referralplatform/audit-outbox.
+    const auditOutbox = { enqueueStandalone: jest.fn(), enqueue: jest.fn() } as any;
+    const service = new PasskeysService(keycloakAdmin, auditOutbox);
     return { service, keycloakAdmin };
   }
 
@@ -61,7 +62,7 @@ describe('PasskeysService', () => {
     await service.revoke(gp, 'c2');
 
     expect(keycloakAdmin.deleteCredential).toHaveBeenCalledWith('user-1', 'c2');
-    expect((service as any).auditClient.record).toHaveBeenCalledWith(
+    expect((service as any).auditOutbox.enqueueStandalone).toHaveBeenCalledWith(
       expect.objectContaining({ subject: { type: 'WebAuthnCredential', id: 'c2' } }),
     );
   });

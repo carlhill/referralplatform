@@ -86,7 +86,7 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
 
   immudb:
-    image: codenotary/immudb:1.9.5
+    image: codenotary/immudb:1.1.0
     container_name: referralplatform-immudb
     restart: unless-stopped
     environment:
@@ -114,6 +114,7 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: change-me-in-local-env
       KC_DB: dev-file
       KC_HEALTH_ENABLED: 'true'
+      KC_LOG_LEVEL: 'info,org.keycloak.authentication:debug'
     ports:
       - '20004:8080' # OIDC issuer for local dev: http://localhost:20004/realms/referralplatform
     volumes:
@@ -121,6 +122,14 @@ services:
       # carer-vs-patient / OTP custom auth flow get defined here as the platform
       # is built out. See infra/keycloak/README.md.
       - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      # KC_DB=dev-file's data lives under /opt/keycloak/data/h2 by default — without
+      # a volume it's container-ephemeral, so EVERY container recreate (not just a
+      # full `docker compose down`) silently wiped the realm back to whatever's in
+      # realm-export.json, discarding any state created only live via the Admin API
+      # (test users, client-scope fixes, rotated secrets). Found 2026-08-15 after a
+      # routine recreate reset gp-portal's login entirely mid-debugging session —
+      # see BUILD_LOG/local-build-fixes.md.
+      - keycloak-data:/opt/keycloak/data
     healthcheck:
       <<: *healthcheck-defaults
       start_period: 40s
@@ -445,20 +454,37 @@ services:
   # ---------------------------------------------------------------------------
 
   gp-portal:
-    build: { context: ., dockerfile: apps/gp-portal/Dockerfile }
+    build:
+      context: .
+      dockerfile: apps/gp-portal/Dockerfile
+      # Next.js inlines NEXT_PUBLIC_* into the client bundle at build time —
+      # the `environment:` block below only affects the running container, which
+      # is already too late (2026-08-15 fix: the Dockerfile previously had no
+      # ARG/ENV wiring at all, so every browser call silently used the fallback
+      # defaults baked into lib/api/config.ts — including the *pre-port-remap*
+      # Keycloak/app URLs, which is why sign-in redirected to the old port 8180
+      # long after docker-compose.yml itself was updated to 20000+. Keep these
+      # args in sync with the `environment:` values below).
+      args:
+        NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+        NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:20008
+        NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
+        NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:20010
+        NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+        NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+        NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+        NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:20016
+        NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: gp-portal
+        NEXT_PUBLIC_APP_BASE_URL: http://localhost:20020
     container_name: referralplatform-gp-portal
     ports: ['20020:3100']
     environment:
       NODE_ENV: development
-      # NOTE (see BUILD_LOG/gp-portal.md): these NEXT_PUBLIC_* values are read by
-      # the *browser*, which runs on the host, not inside the compose network —
-      # they must stay as published host ports (http://localhost:<port>), never
-      # the internal service hostnames. They're also only actually baked into the
-      # client bundle if apps/gp-portal/Dockerfile's build stage sees them (it
-      # currently doesn't pass build args — see known gaps in the final report);
-      # every app's own lib/api/config.ts already falls back to these same
-      # localhost defaults, so this block is set for explicitness/completeness
-      # per this pass's brief, not because the app was broken without it.
+      # These also stay set for the running container (some framework code paths
+      # read process.env directly server-side) — but the build-time ARGs above
+      # are what actually matter for anything shipped to the browser. Keep both
+      # in sync; see the `build.args` comment above for why both exist.
       NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
       NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:20008
       NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
@@ -573,5 +599,6 @@ volumes:
   postgres-data:
   redis-data:
   immudb-data:
+  keycloak-data:
   audit-log-keys:
   fhir-gateway-keys:

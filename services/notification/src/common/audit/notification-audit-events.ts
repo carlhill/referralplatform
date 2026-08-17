@@ -1,33 +1,21 @@
-import type { AuditEventType } from '@referralplatform/shared-types';
-
 /**
- * KNOWN GAP / documented judgment call (same pattern already used in
- * services/onboarding-account/src/common/audit/onboarding-audit-events.ts
- * and services/identity-access/src/common/audit/identity-audit-events.ts):
- * `packages/shared-types`' `AuditEventType` union (src/audit-event.ts) has
- * no event types at all for the referral-scoped secure message thread this
- * service owns. Per that file's own doc comment the correct fix is
- * additive ("append, don't repurpose an existing type"), but
- * `packages/shared-types` is outside this agent's assigned scope
- * (`services/notification` only) — so rather than edit a shared package
- * from here, this service defines its own local event-name constants and
- * passes them to `AuditClient.record()` with an explicit, narrow cast at
- * the call site (`asAuditEventType`). The cast is safe at *runtime* (the
- * Audit Log Service accepts `type` as an opaque string over the wire — see
- * services/audit-log) — it only widens what the *compiler* accepts. The
- * shared-types maintainer should fold these into the real union next time
- * that package is touched.
+ * REMOVED 2026-08-17 — this file used to declare a service-local `NotificationAuditEventType`
+ * union plus an `asAuditEventType()` cast, because `packages/shared-types`'
+ * `AuditEventType` did not list these event types.
  *
- * Only message-thread events are listed here — routine push/SMS/email
- * delivery is NOT audited, per the task brief ("not the routine
- * notification delivery, which is high-volume and not audit-relevant").
+ * That workaround caused real, silent data loss. The Audit Log Service validates
+ * `type` against a runtime whitelist derived from the shared union, so every event
+ * written through the cast was rejected with 400 — and for services writing directly
+ * rather than via the outbox, discarded outright. The comment here even asserted the
+ * cast was "safe at runtime because the wire accepts any string", which was simply
+ * untrue and went unchecked for months.
+ *
+ * All 4 of these event types are now real members of the shared union and of
+ * audit-log's whitelist, kept in step by a compile-time assertion and a contract test.
+ * Emit the literal directly — `type: 'identity.passkey.revoked'` — and add any new
+ * event type to `packages/shared-types/src/audit-event.ts` and to
+ * `services/audit-log/src/audit-events/dto/create-audit-event.dto.ts`.
+ *
+ * An ESLint rule now blocks re-introducing a cast to `AuditEventType`.
  */
-export type NotificationAuditEventType =
-  | 'message_thread.created'
-  | 'message_thread.message_posted'
-  | 'message_thread.participant_added'
-  | 'message_thread.resolved';
-
-export function asAuditEventType(type: NotificationAuditEventType): AuditEventType {
-  return type as unknown as AuditEventType;
-}
+export {};

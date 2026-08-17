@@ -2,7 +2,6 @@ import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import { Interval } from '@nestjs/schedule';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
-import { asAuditEventType } from '../common/audit/identity-audit-events';
 
 /** Realm roles whose holders must authenticate with a passkey only (AAL2/AAL3). */
 const CLINICIAN_ROLES = ['gp', 'specialist'] as const;
@@ -131,7 +130,7 @@ export class ClinicianCredentialReconciler implements OnApplicationBootstrap {
     // that point a credential changed with no durable record of it.
     try {
       await this.auditOutbox.enqueueStandalone({
-        type: asAuditEventType('identity.bootstrap_password.removed'),
+        type: 'identity.bootstrap_password.removed',
         actor: { principalType: 'system', id: 'identity-access.clinician-credential-reconciler' },
         subject: { type: 'Principal', id: userId },
         payload: { role, reason: 'passkey_enrolled', removedCredentialId: password.id },

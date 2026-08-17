@@ -2,7 +2,6 @@ import { ConflictException, Injectable, Logger, NotFoundException } from '@nestj
 import type { ActorRef } from '@referralplatform/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
-import { asAuditEventType } from '../common/audit/notification-audit-events';
 import { NotificationService } from '../notifications/notification.service';
 import type { CreateThreadDto } from './dto/create-thread.dto';
 import type { AddParticipantDto } from './dto/add-participant.dto';
@@ -128,7 +127,7 @@ export class MessageThreadService {
       });
 
       await this.auditOutbox.enqueue(tx, {
-        type: asAuditEventType('message_thread.created'),
+        type: 'message_thread.created',
         actor,
         subject: { type: 'MessageThread', id: created.id },
         payload: { referralId, subject: dto.subject ?? null, participantCount: participantInputs.length },
@@ -205,7 +204,7 @@ export class MessageThreadService {
       }
 
       await this.auditOutbox.enqueue(tx, {
-        type: asAuditEventType('message_thread.message_posted'),
+        type: 'message_thread.message_posted',
         actor,
         subject: { type: 'MessageThread', id: threadId },
         payload: { referralId: thread.referralId, messageId: created.id },
@@ -241,7 +240,7 @@ export class MessageThreadService {
       });
 
       await this.auditOutbox.enqueue(tx, {
-        type: asAuditEventType('message_thread.participant_added'),
+        type: 'message_thread.participant_added',
         actor,
         subject: { type: 'MessageThread', id: threadId },
         payload: { principalType: dto.principalType, principalId: dto.principalId },
@@ -276,7 +275,7 @@ export class MessageThreadService {
       });
 
       await this.auditOutbox.enqueue(tx, {
-        type: asAuditEventType('message_thread.resolved'),
+        type: 'message_thread.resolved',
         actor,
         subject: { type: 'MessageThread', id: threadId },
         payload: { referralId: thread.referralId, note: note ?? null },

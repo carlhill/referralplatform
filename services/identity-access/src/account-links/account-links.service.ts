@@ -5,7 +5,6 @@ import type { AuthenticatedPrincipal } from '@referralplatform/auth-client';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
-import { asAuditEventType } from '../common/audit/identity-audit-events';
 import type { KnownClientId } from './dto/create-link-url.dto';
 
 /**
@@ -128,7 +127,7 @@ export class AccountLinksService {
     this.assertLinkable(provider);
     await this.keycloakAdmin.removeFederatedIdentity(principal.sub, provider);
     await this.auditOutbox.enqueueStandalone({
-      type: asAuditEventType('identity.social_link.removed'),
+      type: 'identity.social_link.removed',
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'FederatedIdentity', id: `${principal.sub}:${provider}` },
       payload: { provider },
@@ -148,7 +147,7 @@ export class AccountLinksService {
     }
     await this.prisma.accountLinkRequest.update({ where: { nonce }, data: { consumedAt: new Date() } });
     await this.auditOutbox.enqueueStandalone({
-      type: asAuditEventType('identity.social_link.created'),
+      type: 'identity.social_link.created',
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'FederatedIdentity', id: `${principal.sub}:${provider}` },
       payload: { provider },

@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedPrincipal } from '@referralplatform/auth-client';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
-import { asAuditEventType } from '../common/audit/identity-audit-events';
 
 export interface PasskeySummary {
   id: string;
@@ -60,7 +59,7 @@ export class PasskeysService {
     await this.keycloakAdmin.deleteCredential(principal.sub, credentialId);
 
     await this.auditOutbox.enqueueStandalone({
-      type: asAuditEventType('identity.passkey.revoked'),
+      type: 'identity.passkey.revoked',
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'WebAuthnCredential', id: credentialId },
       payload: { revokedBy: principal.sub },
@@ -77,7 +76,7 @@ export class PasskeysService {
     await this.keycloakAdmin.addRequiredAction(principal.sub, action);
 
     await this.auditOutbox.enqueueStandalone({
-      type: asAuditEventType('identity.passkey.reenrolment_required'),
+      type: 'identity.passkey.reenrolment_required',
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'Principal', id: principal.sub },
       payload: { requiredAction: action },

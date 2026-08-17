@@ -29,6 +29,37 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+
+      // Casting to AuditEventType hides producer/consumer drift until it becomes
+      // silent data loss. Three services used to declare a local event-type union and
+      // cast at the call site, on the stated assumption that "the Audit Log Service
+      // accepts type as an opaque string over the wire". It does not — it validates
+      // against a runtime whitelist derived from the shared union — so every one of
+      // those events was rejected with 400, and the ones written without an outbox
+      // were discarded outright. Passkey revocations went unrecorded for months.
+      //
+      // Add new event types to packages/shared-types/src/audit-event.ts AND
+      // services/audit-log/src/audit-events/dto/create-audit-event.dto.ts (a
+      // compile-time assertion and a contract test keep the two in step), then emit
+      // the literal directly. Do not reach for a cast.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TSAsExpression > TSTypeReference > Identifier[name="AuditEventType"]',
+          message:
+            'Do not cast to AuditEventType. Add the event type to shared-types AND ' +
+            "audit-log's AUDIT_EVENT_TYPES whitelist, then use the literal directly — " +
+            'a cast only silences the compiler while the Audit Log Service still rejects ' +
+            'the event with 400.',
+        },
+      ],
     },
+  },
+  {
+    // The relay deserialises rows out of Postgres, where `type` is genuinely a
+    // `string` — this is the one legitimate boundary cast, and it is guarded by the
+    // whitelist on the receiving end.
+    files: ['packages/audit-outbox/src/relay.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
   },
 );

@@ -435,3 +435,20 @@ Pre-existing (untouched since the original build, `d140b5d`), and invisible in C
 because those run UTC — but it means the suite fails for any developer in the
 platform's own target market. Fix by pinning the timezone in the booking jest config,
 or by making the mock and its assertions agree on a single timezone.
+
+## 14. [GAP] Secrets management — placeholder guard is a backstop, not a strategy
+
+`change-me-in-local-env` appears 18× in `docker-compose.yml` and 14× in
+`realm-export.json`, alongside `admin`/`admin` for Keycloak and
+`referralplatform:referralplatform` for Postgres. All committed and public.
+
+A runtime guard now refuses to start any service whose `KEYCLOAK_CLIENT_SECRET` is a
+known placeholder **when `NODE_ENV=production`** (`packages/auth-client/src/placeholder-secrets.ts`,
+enforced in `ServiceTokenProvider`'s constructor so it fires at boot with no per-service
+wiring, and inert everywhere else so local dev and CI are unaffected).
+
+That is a backstop. It only covers the Keycloak client secret, not the database
+password, Keycloak admin password, immudb password or NASH signing key — and it cannot
+help at all with the realm file, which ships its secrets inside the import. The real fix
+is injected secrets from a vault/parameter store, with the committed values reduced to
+obviously-invalid markers. Worth doing before any deployment beyond this laptop.

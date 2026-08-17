@@ -1,3 +1,5 @@
+import { assertNotPlaceholderSecret } from './placeholder-secrets';
+
 export interface ServiceTokenConfig {
   /** e.g. http://keycloak:8080/realms/referralplatform */
   issuer: string;
@@ -24,7 +26,12 @@ interface CachedToken {
 export class ServiceTokenProvider {
   private cached?: CachedToken;
 
-  constructor(private readonly config: ServiceTokenConfig) {}
+  constructor(private readonly config: ServiceTokenConfig) {
+    // Fail closed at construction (i.e. at service boot) rather than on the first
+    // outbound call: a service authenticating with a committed placeholder should not
+    // start at all. No-ops outside production. See placeholder-secrets.ts.
+    assertNotPlaceholderSecret('KEYCLOAK_CLIENT_SECRET', config.clientSecret);
+  }
 
   async getToken(): Promise<string> {
     const now = Date.now();

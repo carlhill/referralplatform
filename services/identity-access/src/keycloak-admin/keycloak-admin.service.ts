@@ -3,6 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { ServiceTokenProvider } from '@referralplatform/auth-client';
 
 /** Shape of Keycloak's `CredentialRepresentation` (Admin REST API), trimmed to what this service uses. */
+/** Minimal shape of Keycloak's `UserRepresentation` — only what callers here need. */
+export interface KeycloakUser {
+  id: string;
+  username?: string;
+  enabled?: boolean;
+}
+
 export interface KeycloakCredential {
   id: string;
   type: string; // 'webauthn' | 'webauthn-passwordless' | 'password' | 'otp' | ...
@@ -100,6 +107,40 @@ export class KeycloakAdminService {
 
   async listCredentials(userId: string): Promise<KeycloakCredential[]> {
     return this.request<KeycloakCredential[]>('GET', `/users/${encodeURIComponent(userId)}/credentials`);
+  }
+
+  /**
+   * Every user in the realm, paged (Keycloak returns no total count — keep
+   * requesting until a short page comes back).
+   *
+   * NOTE ON THE OBVIOUS ALTERNATIVE: `GET /roles/{role}/users` would return just
+   * the clinicians directly and avoid walking every patient account. It requires
+   * the `view-realm` client role, which this service account deliberately does not
+   * hold — `view-realm` grants read access to the whole realm configuration
+   * (clients, identity providers, authentication flows), which is far more than a
+   * credential reconciler needs. Enumerating users and reading each one's role
+   * mappings stays within the `view-users` this service already documents needing.
+   * If the realm ever grows large enough for that to hurt, prefer paging in the
+   * background over widening this service account's privileges.
+   */
+  async listUsers(pageSize = 100): Promise<KeycloakUser[]> {
+    const all: KeycloakUser[] = [];
+    for (let first = 0; ; first += pageSize) {
+      const page = await this.request<KeycloakUser[]>('GET', `/users?first=${first}&max=${pageSize}`);
+      all.push(...page);
+      if (page.length < pageSize) {
+        return all;
+      }
+    }
+  }
+
+  /** The realm-role names assigned to a user (readable with `view-users`). */
+  async listRealmRoleNames(userId: string): Promise<string[]> {
+    const roles = await this.request<{ name: string }[]>(
+      'GET',
+      `/users/${encodeURIComponent(userId)}/role-mappings/realm`,
+    );
+    return roles.map((r) => r.name);
   }
 
   async deleteCredential(userId: string, credentialId: string): Promise<void> {

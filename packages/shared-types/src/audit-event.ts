@@ -48,7 +48,18 @@ export type AuditEventType =
   | 'gp_practice.hpio_verified'
   | 'gp_practice.hpio_verification_failed'
   | 'gp_practice.compliance_checklist_acknowledged'
-  | 'practice_onboarding_case.opened';
+  | 'practice_onboarding_case.opened'
+  // IAM/credential-security events. identity-access was already emitting the first
+  // four via an `asAuditEventType` cast whose comment claimed the Audit Log Service
+  // "accepts type as an opaque string over the wire" — it does not, it validates
+  // against a strict whitelist, so every one was rejected with 400. Worse than the
+  // outbox cases: these are direct calls, so they were dropped outright rather than
+  // retried. Found 2026-08-17.
+  | 'identity.passkey.revoked'
+  | 'identity.passkey.reenrolment_required'
+  | 'identity.social_link.created'
+  | 'identity.social_link.removed'
+  | 'identity.bootstrap_password.removed';
 
 /**
  * The event written to the Audit Log Service — see audit-log-architecture-decision.md.

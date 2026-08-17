@@ -1,22 +1,24 @@
 import type { AuditEventType } from '@referralplatform/shared-types';
 
 /**
- * KNOWN GAP / documented judgment call (see BUILD_LOG/identity-access.md):
- * `packages/shared-types`' `AuditEventType` union (src/audit-event.ts) does
- * not yet include IAM/credential-security event types — only clinical and
- * consent-record event types (referral.*, consent.*, gp.link.*, ...). That
- * file's own doc comment says the right way to add one is "append, don't
- * repurpose an existing type" — but `packages/shared-types` is outside this
- * agent's assigned scope (`services/identity-access` only), so rather than
- * edit a shared package from here, this service defines its own local event
- * name constants and passes them to `AuditClient.record()` with an explicit,
- * narrow cast at the call site. The cast is safe at *runtime* (the Audit Log
- * Service accepts `type` as an opaque string over the wire — see
- * services/audit-log), it only widens what the *compiler* accepts. The
- * shared-types maintainer should fold these into the real union next time
- * that package is touched; do not repurpose an unrelated existing type
- * (e.g. 'access.request.granted') to avoid this cast — that would corrupt
- * audit-event semantics for every consumer of the audit log.
+ * RESOLVED 2026-08-17. This file previously carried a documented judgment call:
+ * because `packages/shared-types` was outside the original agent's scope, these
+ * IAM event names were declared locally and force-cast to `AuditEventType`, on
+ * the stated assumption that "the Audit Log Service accepts `type` as an opaque
+ * string over the wire".
+ *
+ * **That assumption was wrong.** `services/audit-log`'s `CreateAuditEventDto`
+ * validates `type` with `@IsIn(AUDIT_EVENT_TYPES)` — a strict runtime whitelist.
+ * Every event written from this service was therefore rejected with 400. And
+ * because these are deliberately *direct* `auditClient.record()` calls rather
+ * than outbox-backed writes (see below), a rejection meant the event was dropped
+ * outright, with no retry and no stored row — so passkey revocations and social
+ * -link changes, which are exactly the security events you would want during an
+ * incident review, were never recorded at all.
+ *
+ * The names are now real members of the shared union and of audit-log's runtime
+ * whitelist, so the cast below is a formality kept only to avoid churning call
+ * sites. When adding a new one, add it in all three places.
  *
  * These events are IAM/security events, not clinical-record or
  * consent-record writes, so per root CONVENTIONS.md §7 ("A direct
@@ -29,7 +31,8 @@ export type IdentityAuditEventType =
   | 'identity.passkey.revoked'
   | 'identity.passkey.reenrolment_required'
   | 'identity.social_link.created'
-  | 'identity.social_link.removed';
+  | 'identity.social_link.removed'
+  | 'identity.bootstrap_password.removed';
 
 export function asAuditEventType(type: IdentityAuditEventType): AuditEventType {
   return type as unknown as AuditEventType;

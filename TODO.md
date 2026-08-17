@@ -81,19 +81,50 @@ ignored` on every single login — meaning **SSO cookie re-authentication never 
 (full re-auth every time) and, in the patient flow, **the myID/TDIF identity-provider
 redirector could never fire at all**. Both sub-flows are now ALTERNATIVE siblings.
 
-## 2a. [GAP] Nothing enforces "clinicians hold no password"
+## 2a. ~~[GAP] Nothing enforces "clinicians hold no password"~~ — **FIXED 2026-08-17**
 
-The whole AAL2/AAL3 guarantee above rests on an enrolled clinician having no password
-credential — enforced today only by my having deleted `gp.test`'s password by hand.
-Provisioning must: issue a one-time bootstrap password, set the
-`webauthn-register-passwordless` required action, and **delete the password once
-enrolment completes**. Until that exists, any clinician who keeps a password can log in
-with it, silently dropping to AAL1. Worth also adding a periodic check for clinician
-accounts holding a password credential.
+`ClinicianCredentialReconciler` (`services/identity-access/src/passkeys/`) sweeps every
+account holding the `gp` or `specialist` realm role and deletes the bootstrap password
+of any clinician who already holds a `webauthn-passwordless` credential. Runs once at
+application bootstrap and every 15 minutes thereafter.
 
-Note for testing: `gp.test` no longer has a password, so the ROPC/password grant used
-throughout `BUILD_LOG/local-build-fixes.md` no longer works for that user — use
+A clinician holding a password but **no** passkey is deliberately left alone — they are
+mid-onboarding and that password is their only way in. Verified live: a sweep over 2
+clinician accounts removed `gp.test`'s redundant password (leaving
+`['webauthn-passwordless']`) and left `specialist.test` untouched (`['password']`), and
+wrote an `identity.bootstrap_password.removed` audit event.
+
+A reconciler rather than an event hook because enrolment completes inside Keycloak's
+own required-action UI, which the service never observes; hooking it would mean
+shipping a Keycloak event-listener SPI JAR. The sweep is also self-healing — it catches
+drift no hook would see (an admin re-adding a password, a realm re-import, a restored
+backup).
+
+Deliberately uses `GET /users` + per-user role mappings rather than
+`GET /roles/{role}/users`, because the latter needs the `view-realm` client role, which
+would grant this service account read access to the entire realm configuration. Noted
+in the code: prefer background paging over widening that privilege if the realm grows.
+
+Note for testing: `gp.test` now has no password, so the ROPC/password grant used
+throughout `BUILD_LOG/local-build-fixes.md` no longer works for that user — and the
+reconciler will now actively strip any password re-added to an enrolled clinician. Use
 `specialist.test` (still bootstrapped) or a service account instead.
+
+## 2d. [GAP] identity-access writes audit events directly, so failures lose them
+
+`identity-access` writes IAM events (`identity.passkey.revoked`,
+`identity.bootstrap_password.removed`, …) with direct `auditClient.record()` calls
+rather than through the outbox pattern — a documented judgment call, on the grounds
+that IAM events have no clinical transaction to stay atomic with. The consequence only
+became visible today: those four event types were **missing from audit-log's runtime
+whitelist**, so every write was rejected with 400 and, having no outbox, was **dropped
+outright** — passkey revocations included. The types are now registered (fixed), but
+the durability gap remains: any future audit-log outage or validation drift silently
+loses IAM events instead of retrying them.
+
+The reconciler now logs a loud, account-specific error when an audit write fails after
+a credential change, but that is a mitigation, not a fix. Consider moving IAM events
+onto the same outbox mechanism every other service uses.
 
 ## 2b. [BUG] The patient flow's OTP step is structurally suspect
 

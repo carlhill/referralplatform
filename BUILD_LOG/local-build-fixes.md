@@ -300,3 +300,53 @@ identity-provider redirector could never fire**, so the TDIF path was unreachabl
 regardless of how it was configured. Both `Forms` sub-flows are now ALTERNATIVE
 siblings, matching Keycloak's own stock browser flow shape. The warning no longer
 appears.
+
+## Enforcing passkey-only clinicians, and a second silent audit-drop (2026-08-17)
+
+Follow-on from the clinician login fix. That fix left the AAL2/AAL3 guarantee resting
+on an operational rule nothing enforced: an enrolled clinician must not keep the
+bootstrap password, because Keycloak goes on offering the password branch and the
+account silently sits at AAL1 while looking passkey-protected.
+
+**`ClinicianCredentialReconciler`** (`services/identity-access/src/passkeys/`) now
+sweeps accounts holding the `gp`/`specialist` realm role and deletes the password of
+any clinician who already holds a `webauthn-passwordless` credential — at bootstrap and
+every 15 minutes. A clinician with a password but no passkey is deliberately skipped;
+they are mid-onboarding and deleting it would lock them out with no recovery path.
+
+Verified live: `2 clinician account(s) checked, 1 bootstrap password(s) removed` —
+`gp.test` left with `['webauthn-passwordless']`, `specialist.test` untouched with
+`['password']`, plus an `identity.bootstrap_password.removed` row in the audit index.
+
+A reconciler rather than a hook because enrolment finishes inside Keycloak's own
+required-action UI, which the service never sees; observing it would mean shipping a
+Keycloak event-listener SPI JAR. The sweep is also self-healing against drift a hook
+would miss (admin re-adding a password, realm re-import, restored backup) — which the
+test exercised directly, since re-adding the password was how the drift state was
+recreated.
+
+**Least privilege beat the obvious query.** `GET /roles/{role}/users` returns exactly
+the clinicians, but 403s for this service account, and unlocking it needs the
+`view-realm` client role — read access to the whole realm config (clients, identity
+providers, authentication flows) for what is only a credential reconciler. Per-user
+role mappings turned out to be readable with the `view-users` the service already
+documents needing, so the sweep enumerates users and filters instead. Slower at scale;
+the tradeoff and the alternative are recorded in the code.
+
+**The second silent audit-drop.** `identity-access` declared its IAM event names
+locally and cast them to `AuditEventType`, with a comment asserting the cast was safe
+because "the Audit Log Service accepts `type` as an opaque string over the wire". It
+does not — `CreateAuditEventDto` validates `@IsIn(AUDIT_EVENT_TYPES)`. So every IAM
+event this service ever wrote was rejected with 400. Worse than the outbox cases fixed
+earlier the same day: these are deliberately *direct* writes with no outbox, so a
+rejection dropped the event entirely rather than queuing a retry — meaning **passkey
+revocations, the exact events you would want during an incident review, were never
+recorded at all**. Registered `identity.passkey.revoked`,
+`identity.passkey.reenrolment_required`, `identity.social_link.created`,
+`identity.social_link.removed` and the new `identity.bootstrap_password.removed` in
+both the shared union and audit-log's whitelist.
+
+Two lessons worth carrying: a comment asserting a runtime contract ("the wire accepts
+any string") is worth *verifying* before relying on it, and a whitelist shared between
+a producer and consumer needs a test that fails when they drift — this is the second
+time the same drift class caused silent data loss in one day.

@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { requireAuth } from '@referralplatform/auth-client';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -31,6 +32,8 @@ import { createTokenVerifier } from './common/clients';
  */
 @Module({
   imports: [
+    // Powers PasskeysModule's ClinicianCredentialReconciler sweep.
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     HealthModule,
     PrismaModule,

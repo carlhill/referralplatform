@@ -48,6 +48,13 @@ export const AUDIT_EVENT_TYPES: AuditEventType[] = [
   'gp_practice.hpio_verification_failed',
   'gp_practice.compliance_checklist_acknowledged',
   'practice_onboarding_case.opened',
+  // IAM/credential-security events from identity-access — see the note in
+  // packages/shared-types/src/audit-event.ts. Keep in sync with that union.
+  'identity.passkey.revoked',
+  'identity.passkey.reenrolment_required',
+  'identity.social_link.created',
+  'identity.social_link.removed',
+  'identity.bootstrap_password.removed',
 ];
 
 const PRINCIPAL_TYPES = ['patient', 'carer', 'gp', 'specialist', 'internal_staff', 'system'] as const;

@@ -424,3 +424,56 @@ much longer (or absent) give-up horizon. For an audit trail, retrying for hours 
 always beat discarding. Left unfixed here deliberately — changing retry semantics in
 one service while five others keep the old policy would be worse than fixing all of
 them together, and it needs a schema column (`nextAttemptAt`) to do properly.
+
+## Audit outbox retry policy, unified across all eleven relays (2026-08-17)
+
+There were **eleven** outbox relays, not six (an earlier note of mine miscounted), and
+they had drifted into two different broken retry policies:
+
+- **Four** (`admin-console`, `identity-access`, `notification`, `onboarding-account`)
+  tracked `attempts` and skipped a row permanently once it reached
+  `MAX_ATTEMPTS = 8`. At a 5-second poll that is a **40-second** total retry budget —
+  less than `audit-log` takes to restart — so an ordinary deploy of the Audit Log
+  Service could permanently strand audit records. Measured, not theorised: an event
+  queued during a test outage hit the cap while the service was still coming back and
+  was never retried again.
+- **The other seven** had no `attempts`/`lastError` columns at all and simply retried
+  every 5 seconds forever: no backoff (hammering a service that was already down) and
+  no record of what failed or how often.
+
+Both are now replaced by one policy, applied identically everywhere:
+
+- **Exponential backoff** — 5s, 10s, 20s, 40s, … capped at 5 minutes — via a new
+  `nextAttemptAt` column. The poll selects rows whose backoff window has elapsed
+  (`nextAttemptAt IS NULL OR <= now()`), so a fresh row is eligible immediately.
+- **No permanent give-up.** `attempts` is kept for diagnosis only. A row still failing
+  after 8 attempts is logged at *error* level so it is visible without querying the
+  table, but it stays queued and keeps retrying. The judgment behind that: for an
+  audit trail a late entry does not break non-repudiation, a lost one does, so
+  retrying for hours must always beat discarding.
+- `attempts` and `lastError` added everywhere they were missing, which also closes the
+  inconsistency that left some services with no failure diagnostics at all.
+
+Migration `20260817060000_audit_outbox_retry_policy` in all eleven services; verified
+afterwards that every `audit_outbox` table carries the three columns.
+
+**Verified by repeating the outage that previously destroyed an event.** With
+`audit-log` stopped for 100 seconds — well past the old 40-second budget — the row was
+still queued and being retried, and it delivered once the service returned:
+
+```
+failed attempt 1, retrying in 5s
+failed attempt 2, retrying in 10s
+failed attempt 3, retrying in 20s
+failed attempt 4, retrying in 40s
+failed attempt 5, retrying in 80s
+→ relayed = t
+```
+
+Two things worth noting for next time. The eleven relays being near-identical copies is
+the reason a one-line policy decision needed eleven edits, eleven migrations and eleven
+rebuilds — and it is why they had already diverged into two behaviours without anyone
+noticing; that logic belongs in a shared package. And removing the `: OutboxRow[]`
+annotation from the poll query silently changed `row.actor`'s type from `unknown` to
+Prisma's `JsonValue`, which broke an existing `as ActorRef` cast in eight services —
+caught by building two representative services first rather than all eleven at once.

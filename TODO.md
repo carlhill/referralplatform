@@ -34,7 +34,45 @@ zero pending, and `POST /audit-events/:id/verify` returns
 **Residual clean-up, worth a look:** two follow-ons surfaced while fixing this —
 see items 1a and 1b.
 
-## 1a. [BUG] Dead-lettered outbox rows have no recovery path
+## 1a. ~~[BUG] Dead-lettered outbox rows have no recovery path~~ — **FIXED 2026-08-17**
+
+Fixed across **all eleven** relays (not six — that figure came from an earlier
+miscount of mine). One uniform retry policy replaces two different broken ones:
+
+- Four relays tracked `attempts` and gave up permanently at `MAX_ATTEMPTS = 8`. At a
+  5-second poll that is a **40-second** retry budget — shorter than an `audit-log`
+  restart — so a routine deploy could permanently strand audit records.
+- The other seven had no bookkeeping at all: they retried every 5s forever with no
+  backoff and recorded nothing about failures, hammering a service that was already
+  down and leaving nothing to diagnose. (My earlier note said only
+  `specialist_review` and `admin_console` were affected; it was seven services.)
+
+Now: exponential backoff (5s → 10s → 20s → … capped at 5 min) via a new
+`nextAttemptAt` column, **no permanent give-up**, and `attempts`/`lastError` present
+everywhere for diagnosis. A row still failing after 8 attempts is logged at error
+level — but it stays queued and keeps retrying. For an audit trail, retrying for hours
+must always beat discarding: a late entry does not break non-repudiation, a lost one
+does.
+
+Verified end-to-end by repeating the exact outage that previously destroyed an event:
+at 100 seconds down (well past the old 40-second budget) the row was still queued and
+alive, and it delivered on recovery.
+
+```
+failed attempt 1, retrying in 5s      → attempt 4, retrying in 40s
+failed attempt 5, retrying in 80s     → relayed = t after audit-log returned
+```
+
+All eleven `audit_outbox` tables now carry `attempts`, `lastError` and `nextAttemptAt`
+(migration `20260817060000_audit_outbox_retry_policy`), which also closes 1b.
+
+**Still worth doing** (not a bug, but the reason this took eleven near-identical
+edits): the relay is copy-pasted per service and the eleven copies had already drifted
+into two behaviours. It belongs in a shared package so there is one implementation to
+fix. An admin requeue endpoint is also still absent — recovery from a genuinely stuck
+row is manual SQL — though with no give-up it is now far less likely to be needed.
+
+## 1a-original. [ORIGINAL ANALYSIS — kept for context]
 
 `AuditOutboxRelayService` stops retrying a row once `attempts` reaches
 `MAX_ATTEMPTS = 8` (`where: { publishedAt: null, attempts: { lt: MAX_ATTEMPTS } }`).

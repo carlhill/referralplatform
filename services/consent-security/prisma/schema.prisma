@@ -188,7 +188,13 @@ model AuditOutbox {
   payload     Json
   occurredAt  DateTime  @default(now())
   publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+  /// When this row next becomes eligible for a relay attempt (exponential backoff).
+  /// NULL means "eligible now" - the state every freshly-enqueued row starts in.
+  nextAttemptAt DateTime?
 
   @@index([publishedAt])
+  @@index([nextAttemptAt])
   @@map("audit_outbox")
 }

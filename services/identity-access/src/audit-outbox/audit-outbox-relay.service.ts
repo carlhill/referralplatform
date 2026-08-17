@@ -8,7 +8,33 @@ import { createAuditClient } from '../common/clients';
 
 const RELAY_INTERVAL_MS = 5_000;
 const BATCH_SIZE = 25;
-const MAX_ATTEMPTS = 8;
+/**
+ * Retry policy (uniform across every service's relay).
+ *
+ * There is no permanent give-up. Previously the four relays that tracked `attempts`
+ * skipped a row forever once it hit `MAX_ATTEMPTS = 8`; at a 5s poll that is a
+ * 40-second retry budget, which is less than the Audit Log Service takes to restart.
+ * A routine deploy could therefore permanently strand audit records, and it did —
+ * measured on 2026-08-17. The other seven relays had the opposite flaw: they retried
+ * every 5s forever with no backoff and no record of the failure, hammering a service
+ * that was already down and leaving nothing to diagnose afterwards.
+ *
+ * For an audit trail, retrying for hours must always beat discarding: a lost entry
+ * breaks the platform's non-repudiation guarantee, whereas a late one does not. So a
+ * failed row now backs off exponentially and keeps trying indefinitely.
+ *
+ * `attempts` and `lastError` are retained purely for diagnosis, and rows that have
+ * been failing for a long time are logged at error level so they are visible without
+ * anyone querying the table by hand.
+ */
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_MAX_MS = 5 * 60 * 1000;
+/** Attempts after which a still-failing row is reported at error level rather than warn. */
+const ESCALATE_AFTER_ATTEMPTS = 8;
+
+function backoffMs(attempts: number): number {
+  return Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1), BACKOFF_MAX_MS);
+}
 
 /**
  * The relay half of the outbox pattern (root CONVENTIONS.md §7): polls for
@@ -16,13 +42,8 @@ const MAX_ATTEMPTS = 8;
  * marking it published on success. A row that keeps failing is retried on the next
  * tick rather than dropped, with `attempts`/`lastError` recorded for diagnosis.
  *
- * Mirrors the relay in `onboarding-account` deliberately — one behaviour to reason
- * about across services — with one addition: a row that exhausts MAX_ATTEMPTS is
- * logged as stranded. In the other services a capped row is simply skipped by the
- * query forever, with nothing surfacing that audit entries are stuck; that cost real
- * time to diagnose on 2026-08-17, when rows capped out during an unrelated outage
- * and stayed invisible until someone queried the table by hand. See TODO 1a — the
- * proper fix (a metric plus an admin requeue path) is still open platform-wide.
+ * Identical in behaviour to every other service's relay — see the retry policy
+ * above, which is deliberately uniform so there is one thing to reason about.
  */
 @Injectable()
 export class AuditOutboxRelayService implements OnModuleInit {
@@ -59,8 +80,14 @@ export class AuditOutboxRelayService implements OnModuleInit {
   }
 
   private async relayOnce(): Promise<void> {
+    const now = new Date();
     const pending = await this.prisma.auditOutbox.findMany({
-      where: { publishedAt: null, attempts: { lt: MAX_ATTEMPTS } },
+      // No attempts cap: a row is eligible whenever its backoff window has elapsed,
+      // so nothing is ever permanently skipped.
+      where: {
+        publishedAt: null,
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+      },
       orderBy: { occurredAt: 'asc' },
       take: BATCH_SIZE,
     });
@@ -81,19 +108,25 @@ export class AuditOutboxRelayService implements OnModuleInit {
       } catch (err) {
         const message = (err as Error).message ?? 'unknown error';
         const attempts = row.attempts + 1;
+        const delay = backoffMs(attempts);
         await this.prisma.auditOutbox.update({
           where: { id: row.id },
-          data: { attempts: { increment: 1 }, lastError: message.slice(0, 500) },
+          data: {
+            attempts: { increment: 1 },
+            lastError: message.slice(0, 500),
+            nextAttemptAt: new Date(Date.now() + delay),
+          },
         });
 
-        if (attempts >= MAX_ATTEMPTS) {
-          // Loud, because from here the row is invisible to the poll query above and
-          // will never be retried without manual intervention.
-          this.logger.error(
-            `Audit outbox row ${row.id} (${row.type}) STRANDED after ${attempts} attempts and will no longer be retried: ${message}`,
-          );
+        const detail = `audit outbox row ${row.id} (${row.type}) failed attempt ${attempts}, retrying in ${Math.round(
+          delay / 1000,
+        )}s: ${message}`;
+        if (attempts >= ESCALATE_AFTER_ATTEMPTS) {
+          // Still queued and still being retried - but it has been failing long
+          // enough that someone should look at it.
+          this.logger.error(`Persistently failing ${detail}`);
         } else {
-          this.logger.warn(`Failed to relay audit outbox row ${row.id} (attempt ${attempts}): ${message}`);
+          this.logger.warn(`Failed to relay ${detail}`);
         }
       }
     }

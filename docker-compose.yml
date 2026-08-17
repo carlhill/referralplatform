@@ -530,7 +530,25 @@ services:
       - notification
 
   specialist-portal:
-    build: { context: ., dockerfile: apps/specialist-portal/Dockerfile }
+    build:
+      context: .
+      dockerfile: apps/specialist-portal/Dockerfile
+      # Next.js inlines NEXT_PUBLIC_* into the client bundle at `next build` time, so
+      # the `environment:` block below never reaches the browser code — it only affects
+      # the running container, which is too late. Without these build args the app ships
+      # whatever fallbacks are hard-coded in its source, and those were the *pre-port-remap*
+      # URLs (8180, 3101/3102, 3005-3010): exactly the bug that made gp-portal redirect
+      # sign-in to a dead port long after docker-compose.yml had been updated. Keep these
+      # in sync with the `environment:` values below.
+      args:
+        NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+        NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+        NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+        NEXT_PUBLIC_SPECIALIST_REVIEW_URL: http://localhost:20014
+        NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:20013
+        NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+        NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: specialist-portal
     container_name: referralplatform-specialist-portal
     ports: ['20021:3101']
     environment:
@@ -554,7 +572,29 @@ services:
       - followup-recall
 
   patient-web:
-    build: { context: ., dockerfile: apps/patient-web/Dockerfile }
+    build:
+      context: .
+      dockerfile: apps/patient-web/Dockerfile
+      # Next.js inlines NEXT_PUBLIC_* into the client bundle at `next build` time, so
+      # the `environment:` block below never reaches the browser code — it only affects
+      # the running container, which is too late. Without these build args the app ships
+      # whatever fallbacks are hard-coded in its source, and those were the *pre-port-remap*
+      # URLs (8180, 3101/3102, 3005-3010): exactly the bug that made gp-portal redirect
+      # sign-in to a dead port long after docker-compose.yml had been updated. Keep these
+      # in sync with the `environment:` values below.
+      args:
+        NEXT_PUBLIC_IDENTITY_ACCESS_URL: http://localhost:20007
+        NEXT_PUBLIC_ONBOARDING_ACCOUNT_URL: http://localhost:20008
+        NEXT_PUBLIC_GP_AUTHORISATION_URL: http://localhost:20009
+        NEXT_PUBLIC_CONSENT_SECURITY_URL: http://localhost:20010
+        NEXT_PUBLIC_REFERRAL_SERVICE_URL: http://localhost:20011
+        NEXT_PUBLIC_DIRECTORY_SERVICE_URL: http://localhost:20012
+        NEXT_PUBLIC_BOOKING_SERVICE_URL: http://localhost:20013
+        NEXT_PUBLIC_FOLLOWUP_RECALL_URL: http://localhost:20015
+        NEXT_PUBLIC_NOTIFICATION_SERVICE_URL: http://localhost:20016
+        NEXT_PUBLIC_KEYCLOAK_ISSUER: http://localhost:20004/realms/referralplatform
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: patient-web
+        NEXT_PUBLIC_APP_BASE_URL: http://localhost:20022
     container_name: referralplatform-patient-web
     ports: ['20022:3102']
     environment:

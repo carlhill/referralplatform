@@ -227,7 +227,24 @@ because a passkey was enrolled via an `execute-actions-email` magic link.
 flow was presumably authored to hit specific AAL2/AAL3 requirements, so the fix needs
 to preserve the assurance level while actually being enrollable.
 
-## 3. [GAP] Two of the three frontends have never been run at all
+## 3. [PARTLY FIXED 2026-08-17] Two of the three frontends have never been run
+
+**The build-arg half is fixed.** `specialist-portal` (8 vars) and `patient-web` (12)
+now receive their `NEXT_PUBLIC_*` values as Docker build args and re-export them as ENV
+before `next build`, matching the gp-portal fix. Both previously shipped the
+*pre-port-remap* fallbacks hard-coded in their source (8180, 3101/3102, 3005-3010) —
+the same defect that made gp-portal redirect sign-in to a dead port.
+
+Verified by inspecting the built images rather than trusting the config: `.next/static`
+(the client chunks) now contains **zero** stale URLs and the correct 200xx values, in
+both apps. (Unreplaced `process.env.NEXT_PUBLIC_*` text still appears in a server-side
+`.js.map` source map — that is inert, and server-side reads get the right value from
+the container environment at runtime.)
+
+**Still open:** neither app has actually been opened and walked through. That needs
+manual testing.
+
+## 3-original. [ORIGINAL ANALYSIS — kept for context]
 
 `specialist-portal` and `patient-web` have not been opened, let alone exercised. Both
 certainly still carry the **`NEXT_PUBLIC_*` build-arg bug** fixed for `gp-portal`

@@ -350,3 +350,41 @@ Two lessons worth carrying: a comment asserting a runtime contract ("the wire ac
 any string") is worth *verifying* before relying on it, and a whitelist shared between
 a producer and consumer needs a test that fails when they drift — this is the second
 time the same drift class caused silent data loss in one day.
+
+## Contract test: shared union vs. audit-log's runtime whitelist (2026-08-17)
+
+The same drift caused silent data loss twice in one day (ten `account.*`/`gp_practice.*`
+types, then four `identity.*` types), so the "keep in sync" comment has been replaced
+with something that actually fails.
+
+**Compile-time guard** (`create-audit-event.dto.ts`). `AUDIT_EVENT_TYPES` is now
+`as const`, and two assertions check both directions: nothing in the whitelist that
+isn't a real `AuditEventType`, and nothing in the union missing from the whitelist. The
+second is the one that keeps biting. Verified by deliberately deleting an entry and
+rebuilding — the Docker build fails, and the error names the offender:
+
+```
+error TS2322: Type 'boolean' is not assignable to type
+'{ ERROR: "AuditEventType members are missing from AUDIT_EVENT_TYPES";
+   missing: "identity.passkey.revoked"; }'
+```
+
+Because it's a type error, `npm run build` fails, so a drifted whitelist can't reach a
+running container at all. `@IsIn` now takes `[...AUDIT_EVENT_TYPES]` since the array is
+readonly.
+
+**Runtime test** (`audit-event-types.contract.spec.ts`, 3 cases). Parses the union out
+of the shared-types *source file* and compares it against the imported constant, plus a
+duplicate check. It duplicates the compile-time guard on purpose: it reads the source of
+truth rather than the compiled type, so it also catches someone weakening or deleting
+the assertions, and it reports drift as a plain list of event names rather than a type
+error.
+
+Two things worth remembering from writing it. It needs `import 'reflect-metadata'`
+before the DTO import, or the class-validator decorators throw
+`Reflect.getMetadata is not a function` at module load. And the first version parsed the
+union up to its terminating `;` *before* stripping comments — prose in an interleaved
+comment contained a semicolon ("Found 2026-08-17; see BUILD_LOG..."), which truncated
+the parse and made every member after it look absent. The test caught its own bug on
+first run; comments are now stripped first, whole-line `//` only so a `https://` in
+prose can't eat its line.

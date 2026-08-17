@@ -3,11 +3,23 @@ import { IsIn, IsISO8601, IsObject, IsOptional, IsString, ValidateNested } from 
 import type { ActorRef, AuditEventType } from '@referralplatform/shared-types';
 
 /**
- * Keep in sync with packages/shared-types/src/audit-event.ts's AuditEventType
- * union — class-validator needs a concrete runtime list, it can't validate
- * against a TS type. If you add an event type there, add it here too.
+ * Runtime counterpart of `packages/shared-types`' `AuditEventType` union —
+ * class-validator needs a concrete list, it can't validate against a TS type.
+ *
+ * These two MUST stay identical, and the assertions below the array enforce it at
+ * compile time (see also audit-event-types.contract.spec.ts). This used to be a
+ * "keep in sync" comment and nothing else, and it drifted twice in one day with the
+ * same result both times — **silent data loss**:
+ *   - ten types emitted by onboarding-account/admin-console were missing here, so
+ *     every one was rejected with 400 and retried until it hit the outbox attempts
+ *     cap, meaning OTP issuance and HPI-O verification were never recorded;
+ *   - four `identity.*` types from identity-access were missing too, and because
+ *     that service writes directly rather than via an outbox, those were dropped
+ *     outright — passkey revocations included.
+ * A drifted whitelist does not fail loudly anywhere; it just quietly stops recording
+ * events. Hence a compile-time contract rather than another comment.
  */
-export const AUDIT_EVENT_TYPES: AuditEventType[] = [
+export const AUDIT_EVENT_TYPES = [
   'account.activation.requested',
   'account.activated',
   'carer.registered',
@@ -55,7 +67,34 @@ export const AUDIT_EVENT_TYPES: AuditEventType[] = [
   'identity.social_link.created',
   'identity.social_link.removed',
   'identity.bootstrap_password.removed',
-];
+] as const;
+
+/** The literal union of what this whitelist actually contains, for the checks below. */
+type WhitelistedEventType = (typeof AUDIT_EVENT_TYPES)[number];
+
+/**
+ * Direction 1 — nothing in the whitelist that isn't a real `AuditEventType`.
+ * A typo'd or invented entry here would let a producer write an event type no
+ * consumer of the audit log understands.
+ */
+const _noUnknownTypes: readonly AuditEventType[] = AUDIT_EVENT_TYPES;
+void _noUnknownTypes;
+
+/**
+ * Direction 2 — nothing in the union missing from the whitelist. This is the one
+ * that keeps biting: a producer adds an event type to shared-types, ships it, and
+ * the Audit Log Service silently 400s every write.
+ *
+ * If they drift, this line fails to compile and the error names the missing members
+ * (e.g. `Type 'true' is not assignable to ... missing: "identity.passkey.revoked"`),
+ * so `npm run build` — and therefore the Docker build — fails rather than the gap
+ * reaching production.
+ */
+type MissingFromWhitelist = Exclude<AuditEventType, WhitelistedEventType>;
+const _noMissingTypes: [MissingFromWhitelist] extends [never]
+  ? true
+  : { ERROR: 'AuditEventType members are missing from AUDIT_EVENT_TYPES'; missing: MissingFromWhitelist } = true;
+void _noMissingTypes;
 
 const PRINCIPAL_TYPES = ['patient', 'carer', 'gp', 'specialist', 'internal_staff', 'system'] as const;
 
@@ -84,7 +123,9 @@ export class SubjectRefDto {
 }
 
 export class CreateAuditEventDto {
-  @IsIn(AUDIT_EVENT_TYPES)
+  // Spread into a mutable array: AUDIT_EVENT_TYPES is `as const` (readonly) so the
+  // compile-time contract above can see its literal members.
+  @IsIn([...AUDIT_EVENT_TYPES])
   type!: AuditEventType;
 
   @ValidateNested()

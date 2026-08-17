@@ -325,7 +325,32 @@ and already-verified services get OOM-killed (exit 137) or hang while still appe
 and the stale-`wslrelay.exe` port-squatting issue that produces very convincing
 false-positive "the app is broken" symptoms.
 
-## 13. [BUG] Two booking tests assume the runner's timezone is UTC
+## 13. ~~[BUG] Two booking tests assume the runner's timezone is UTC~~ — **FIXED 2026-08-17**
+
+It was not a test bug. `slot-matching.ts` evaluated a patient's day/time preference
+with `Date.getDay()`/`getHours()` — the *server's* timezone. Containers run UTC, so
+"Wednesday afternoon" for an Australian patient resolved to Wednesday 22:00–Thursday
+03:00 Sydney time: the middle of the night, on the wrong day. The mock calendar had the
+same flaw, generating its "standard AU clinic hours" 09:00–17:00 in server-local time
+(19:00–03:00 Sydney in a UTC container).
+
+Fixed by making the clinic timezone explicit (`services/booking/src/common/clinic-time.ts`,
+`CLINIC_TIME_ZONE`, default `Australia/Sydney`, overridable per deployment). Matching
+and slot generation both resolve through `Intl.DateTimeFormat` with an explicit zone,
+so they are correct across daylight-saving transitions without a date library. Tests
+now state intent as clinic wall-clock times via `clinicWallClock()` rather than bare
+ISO strings — `new Date('2026-09-01T09:00:00')` has no offset and is parsed in the
+server's zone, which is how these passed only on the machine they were written on.
+
+Verified: booking's 42 tests pass under Australia/Sydney, UTC, America/New_York and
+Asia/Kolkata (deliberately including a half-hour offset), and the full workspace suite
+passes under both Sydney and UTC.
+
+**Known simplification:** one platform-wide timezone, where the correct model is
+per-practice — Australia spans five zones, and a clinic appointment means the
+*specialist's* local time. Recorded in the code.
+
+## 13-original. [ORIGINAL ANALYSIS — kept for context]
 
 `MockCalendarClient › only returns free windows within AU clinic hours on weekdays` and
 `BookingService › create — preference matching › auto-confirms the best-matching

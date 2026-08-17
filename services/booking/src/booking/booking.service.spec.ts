@@ -45,13 +45,17 @@ describe('BookingService', () => {
     it('auto-confirms the best-matching available slot', async () => {
       const prisma = new FakePrisma();
       const { service } = makeService(prisma);
-      await seedSlot(prisma, '2026-09-02T14:00:00Z'); // wednesday afternoon — matches
-      await seedSlot(prisma, '2026-09-01T09:00:00Z'); // tuesday morning — doesn't match preference but is soonest
+      // Instants chosen for what they mean in the CLINIC timezone (Australia/Sydney,
+      // AEST/UTC+10 in September), because that is the frame preferences are matched
+      // in — see common/clinic-time.ts. These used to be written as if the clinic ran
+      // on UTC, which is why this test only passed on a UTC machine.
+      await seedSlot(prisma, '2026-09-02T04:00:00Z'); // Wed 14:00 Sydney — matches the preference
+      await seedSlot(prisma, '2026-09-01T00:00:00Z'); // Tue 10:00 Sydney — soonest, but doesn't match
 
       const booking = await service.create(baseDto({ preferredDayOfWeek: 'wednesday', preferredTimeOfDay: 'afternoon' }), actor);
 
       expect(booking.status).toBe('confirmed');
-      expect(booking.confirmedSlotStartsAt?.toISOString()).toBe('2026-09-02T14:00:00.000Z');
+      expect(booking.confirmedSlotStartsAt?.toISOString()).toBe('2026-09-02T04:00:00.000Z');
     });
 
     it('falls back to the waitlist when no slots exist at all', async () => {

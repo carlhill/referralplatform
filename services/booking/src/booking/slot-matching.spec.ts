@@ -1,25 +1,29 @@
+// Dates are stated as clinic wall-clock times rather than bare ISO strings:
+// `new Date('2026-09-01T09:00:00')` has no offset, so JS parses it in the *server's*
+// timezone, which made these tests pass only where they were written.
 import { dayOfWeekNameFor, rankSlotsByPreference, timeOfDayBandFor } from './slot-matching';
+import { clinicWallClock } from '../common/clinic-time';
 
 describe('timeOfDayBandFor', () => {
   it('classifies morning/afternoon/evening correctly', () => {
-    expect(timeOfDayBandFor(new Date('2026-09-01T09:00:00'))).toBe('morning');
-    expect(timeOfDayBandFor(new Date('2026-09-01T13:00:00'))).toBe('afternoon');
-    expect(timeOfDayBandFor(new Date('2026-09-01T18:00:00'))).toBe('evening');
+    expect(timeOfDayBandFor(clinicWallClock('2026-09-01', '09:00'))).toBe('morning');
+    expect(timeOfDayBandFor(clinicWallClock('2026-09-01', '13:00'))).toBe('afternoon');
+    expect(timeOfDayBandFor(clinicWallClock('2026-09-01', '18:00'))).toBe('evening');
   });
 });
 
 describe('dayOfWeekNameFor', () => {
   it('returns the lowercase day name', () => {
     // 2026-09-01 is a Tuesday
-    expect(dayOfWeekNameFor(new Date('2026-09-01T09:00:00'))).toBe('tuesday');
+    expect(dayOfWeekNameFor(clinicWallClock('2026-09-01', '09:00'))).toBe('tuesday');
   });
 });
 
 describe('rankSlotsByPreference', () => {
-  const tuesdayMorning = { id: 'a', startsAt: new Date('2026-09-01T09:00:00') };
-  const tuesdayAfternoon = { id: 'b', startsAt: new Date('2026-09-01T14:00:00') };
-  const wednesdayMorning = { id: 'c', startsAt: new Date('2026-09-02T09:00:00') };
-  const wednesdayEvening = { id: 'd', startsAt: new Date('2026-09-02T18:00:00') };
+  const tuesdayMorning = { id: 'a', startsAt: clinicWallClock('2026-09-01', '09:00') };
+  const tuesdayAfternoon = { id: 'b', startsAt: clinicWallClock('2026-09-01', '14:00') };
+  const wednesdayMorning = { id: 'c', startsAt: clinicWallClock('2026-09-02', '09:00') };
+  const wednesdayEvening = { id: 'd', startsAt: clinicWallClock('2026-09-02', '18:00') };
 
   it('ranks a slot matching both day and time-of-day first', () => {
     const ranked = rankSlotsByPreference(

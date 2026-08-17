@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { clinicPartsFor } from '../common/clinic-time';
 import type {
   CalendarClient,
   CalendarEventInput,
@@ -36,15 +37,13 @@ export class MockCalendarClient implements CalendarClient {
     const busy = this.busyWindowsFor(externalCalendarId, rangeStart, rangeEnd);
     const free: FreeBusyWindow[] = [];
 
-    for (const day of eachWeekday(rangeStart, rangeEnd)) {
-      for (const slotStart of clinicSlotsForDay(day)) {
-        const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
-        if (slotStart < rangeStart || slotEnd > rangeEnd) continue;
-        const isBusy = busy.some((b) => overlaps(slotStart, slotEnd, b.startsAt, b.endsAt));
-        const isPseudoRandomlyBusy = pseudoRandomBusy(externalCalendarId, slotStart);
-        if (!isBusy && !isPseudoRandomlyBusy) {
-          free.push({ startsAt: slotStart, endsAt: slotEnd });
-        }
+    for (const slotStart of clinicSlotsIn(rangeStart, rangeEnd)) {
+      const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
+      if (slotEnd > rangeEnd) continue;
+      const isBusy = busy.some((b) => overlaps(slotStart, slotEnd, b.startsAt, b.endsAt));
+      const isPseudoRandomlyBusy = pseudoRandomBusy(externalCalendarId, slotStart);
+      if (!isBusy && !isPseudoRandomlyBusy) {
+        free.push({ startsAt: slotStart, endsAt: slotEnd });
       }
     }
     return free;
@@ -77,21 +76,26 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
 
-function* eachWeekday(rangeStart: Date, rangeEnd: Date): Generator<Date> {
-  const cursor = new Date(rangeStart);
-  cursor.setHours(0, 0, 0, 0);
-  while (cursor < rangeEnd) {
-    const day = cursor.getDay();
-    if (day !== 0 && day !== 6) yield new Date(cursor);
-    cursor.setDate(cursor.getDate() + 1);
-  }
-}
-
-function* clinicSlotsForDay(day: Date): Generator<Date> {
-  for (let hour = 9; hour < 17; hour++) {
-    for (const minute of [0, 30]) {
-      yield new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0);
-    }
+/**
+ * Every 30-minute slot in the range that falls on a weekday between 09:00 and 16:30
+ * **in the clinic's timezone** (see common/clinic-time.ts).
+ *
+ * Previously this built slots with the local-time Date constructor, so "standard AU
+ * clinic hours" actually meant 09:00-17:00 in whatever timezone the process ran in —
+ * in a UTC container that is 19:00-03:00 Sydney time, i.e. not clinic hours at all.
+ * Walking real instants and filtering by their clinic-zone parts is timezone-correct
+ * by construction, including across daylight-saving transitions.
+ */
+function* clinicSlotsIn(rangeStart: Date, rangeEnd: Date): Generator<Date> {
+  const THIRTY_MIN = 30 * 60 * 1000;
+  // Align to the next 30-minute boundary so slot starts are always :00 or :30.
+  let t = Math.ceil(rangeStart.getTime() / THIRTY_MIN) * THIRTY_MIN;
+  for (; t < rangeEnd.getTime(); t += THIRTY_MIN) {
+    const candidate = new Date(t);
+    const { weekday, hour } = clinicPartsFor(candidate);
+    if (weekday === 'saturday' || weekday === 'sunday') continue;
+    if (hour < 9 || hour >= 17) continue;
+    yield candidate;
   }
 }
 

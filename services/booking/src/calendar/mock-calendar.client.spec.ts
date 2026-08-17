@@ -1,4 +1,5 @@
 import { MockCalendarClient } from './mock-calendar.client';
+import { clinicPartsFor } from '../common/clinic-time';
 
 describe('MockCalendarClient', () => {
   it('only returns free windows within AU clinic hours on weekdays', async () => {
@@ -10,11 +11,15 @@ describe('MockCalendarClient', () => {
 
     expect(free.length).toBeGreaterThan(0);
     for (const window of free) {
-      const day = window.startsAt.getUTCDay();
-      expect(day).not.toBe(0); // not Sunday
-      expect(day).not.toBe(6); // not Saturday
-      expect(window.startsAt.getUTCHours()).toBeGreaterThanOrEqual(9);
-      expect(window.startsAt.getUTCHours()).toBeLessThan(17);
+      // Asserted in the CLINIC timezone, which is the frame the mock generates in.
+      // This previously asserted getUTCHours(), so it only passed when the runner's
+      // timezone happened to be UTC — green in CI and Docker, red for any developer
+      // in the platform's own market.
+      const { weekday, hour } = clinicPartsFor(window.startsAt);
+      expect(weekday).not.toBe('saturday');
+      expect(weekday).not.toBe('sunday');
+      expect(hour).toBeGreaterThanOrEqual(9);
+      expect(hour).toBeLessThan(17);
       expect(window.endsAt.getTime() - window.startsAt.getTime()).toBe(30 * 60 * 1000);
     }
   });

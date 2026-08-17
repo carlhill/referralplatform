@@ -10,6 +10,8 @@
  * the ranking rules are trivially unit-testable in isolation.
  */
 
+import { clinicPartsFor } from '../common/clinic-time';
+
 export type TimeOfDayBand = 'morning' | 'afternoon' | 'evening';
 
 /**
@@ -18,18 +20,21 @@ export type TimeOfDayBand = 'morning' | 'afternoon' | 'evening';
  * afternoon 12:00–16:59, evening 17:00–20:59. Slots outside 06:00–20:59
  * (shouldn't occur given MockCalendarClient's 09:00–17:00 clinic hours, but
  * handled defensively) fall through to 'evening'.
+ *
+ * Resolved in the CLINIC timezone, not the server's — see common/clinic-time.ts. Using
+ * Date.getHours() here meant a patient's preference was matched against whatever
+ * timezone the container happened to run in.
  */
 export function timeOfDayBandFor(date: Date): TimeOfDayBand {
-  const hour = date.getHours();
+  const { hour } = clinicPartsFor(date);
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
   return 'evening';
 }
 
-const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-
+/** Resolved in the CLINIC timezone, not the server's — see common/clinic-time.ts. */
 export function dayOfWeekNameFor(date: Date): string {
-  return DAY_NAMES[date.getDay()];
+  return clinicPartsFor(date).weekday;
 }
 
 export interface RankableSlot {

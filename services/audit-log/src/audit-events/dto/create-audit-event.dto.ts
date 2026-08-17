@@ -34,6 +34,20 @@ export const AUDIT_EVENT_TYPES: AuditEventType[] = [
   'patient.deceased.flagged',
   'access.request.granted',
   'access.request.denied',
+  // Emitted by onboarding-account and admin-console but missing from this list,
+  // so every one was rejected with 400 and retried forever in the producer's
+  // outbox — exactly the drift this file's header comment warns about. Keep in
+  // sync with packages/shared-types/src/audit-event.ts.
+  'account.activation.branch_selected',
+  'account.activation.identity_verified',
+  'account.otp.sent',
+  'account.otp.verified',
+  'account.passkey_enrolment.prompt_failed',
+  'gp_practice.registration_requested',
+  'gp_practice.hpio_verified',
+  'gp_practice.hpio_verification_failed',
+  'gp_practice.compliance_checklist_acknowledged',
+  'practice_onboarding_case.opened',
 ];
 
 const PRINCIPAL_TYPES = ['patient', 'carer', 'gp', 'specialist', 'internal_staff', 'system'] as const;

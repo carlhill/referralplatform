@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AuditEvent, AuditEventId, AuditEventType, ISODateTimeString } from '@referralplatform/shared-types';
 import { canonicalJson } from '../common/canonical-json';
 import { CryptoShreddingService } from '../crypto-shredding/crypto-shredding.service';
@@ -38,6 +38,8 @@ const IMMUDB_KEY_PREFIX = 'audit-event:';
 
 @Injectable()
 export class AuditEventsService {
+  private readonly logger = new Logger(AuditEventsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly immudb: ImmudbService,
@@ -170,8 +172,19 @@ export class AuditEventsService {
     try {
       const read = await this.immudb.verifiedGet(index.immudbKey);
       stored = JSON.parse(read.value) as StoredEnvelope;
-    } catch {
+    } catch (err) {
+      // Log the reason. A bare `catch {}` here previously reported a plain
+      // JSON.parse failure (caused by a decoding bug in ImmudbService.verifiedGet)
+      // as `immudbProofValid: false` — i.e. it looked exactly like tamper
+      // detection on entries that were completely intact, with nothing logged to
+      // tell the two apart. A failed proof and a failed decode are very different
+      // incidents; never collapse them silently.
       immudbProofValid = false;
+      this.logger.error(
+        `Verification read failed for audit event '${id}' (immudb key '${index.immudbKey}'): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
 
     let nashSignatureValid = false;

@@ -190,3 +190,67 @@ Also note: `localhost` and `127.0.0.1` are **different WebAuthn origins**. Keep 
 ## Next steps / where this left off
 
 Working through services one at a time, end-to-end (build → container up → health check passing), per Carl's explicit instruction — not full-stack rebuilds. Order so far: infra (postgres, redis, immudb, keycloak) → `audit-log` (first app service, chosen because it has no app-level dependencies, only infra) — **done, fully verified**. Also rolling the Docker build-caching fix out across all Node Dockerfiles (see above) since it benefits every remaining service's build speed. Next: pick the next service (one with real app-level dependencies, to prove that pattern too) and repeat the same full verification.
+
+## The audit trail: four stacked bugs, now fixed end-to-end (2026-08-17)
+
+Starting state: `audit_log.audit_event_index` had **0 rows** while five services held
+24 unrelayed entries in their outboxes. Fixing it took four independent bugs, each
+hidden behind the previous one — worth reading as a sequence, because each one only
+became visible once the one before it was cleared.
+
+**1. immudb server/client version gap.** Every `verifiedSet` failed instantly with
+`verifiedSet dual verification failed` — the client's Merkle-proof check rejecting the
+server's response on every write from a cold start. `immudb-node@1.1.1` is from 2021
+(its release notes say "Update schema to version 1.1.0 of immudb") and was talking to
+a far newer server. Fixed by pinning `codenotary/immudb:1.1.0` to match the client.
+There is no maintained Node SDK to upgrade to instead — every candidate is years
+stale — so pinning the server is the practical option.
+
+**2. Database-name validation.** With the older server, startup then failed on
+`punctuation marks and symbols are not allowed in database name`: immudb 1.1.0 rejects
+underscores, and the service asked for `audit_log`. Renamed to `auditlog` via
+`IMMUDB_DATABASE` (env-only, no rebuild). Newer immudb allows underscores, which is
+why this had never been hit.
+
+**3. `verifiedGet` corrupted its own read — and reported it as tamper detection.**
+Writes now worked, but `POST /audit-events/:id/verify` returned `valid: false` with
+`immudbProofValid: false`, on entries that were completely intact. `ImmudbService.verifiedGet`
+did `Buffer.from(entry.value, 'base64')`, on the documented assumption that the SDK
+base64-encodes `value`. It does not — proven by calling `verifiedGet` directly against
+the live server inside the container, which returns `typeof value === 'string'` holding
+the exact JSON envelope. Base64-decoding already-plain text produced garbage,
+`JSON.parse` threw, and a bare `catch {}` in `AuditEventsService.verify` turned that
+into `immudbProofValid: false`.
+
+That is the most dangerous bug of the four: **a decode error was indistinguishable
+from tamper detection**, on the one code path whose entire job is to tell you whether
+your audit trail has been altered — and it logged nothing at all. The `catch` now logs
+the reason. A failed proof and a failed decode are very different incidents and must
+never collapse into the same silent boolean.
+
+**4. Event types rejected by the consumer.** With verification fixed, `onboarding-account`'s
+outbox still would not drain: `lastError` showed `Audit Log Service returned 400`. Ten
+event types the producers deliberately emit (`account.otp.sent`,
+`account.activation.identity_verified`, `gp_practice.hpio_verified`,
+`practice_onboarding_case.opened`, …) were absent from both
+`packages/shared-types`' `AuditEventType` union and audit-log's runtime
+`AUDIT_EVENT_TYPES` whitelist — exactly the drift that file's own header comment warns
+about. Added to both. Note this means real consent- and identity-relevant actions
+(OTP issuance/verification, HPI-O verification) were never being recorded at all.
+
+**Plus one operational trap.** Once all four were fixed the rows *still* did not
+relay: they had already hit `MAX_ATTEMPTS = 8` while the bugs were live, and the relay
+query filters `attempts: { lt: MAX_ATTEMPTS }`, so it skipped them permanently. They
+only moved after a manual `UPDATE ... SET attempts = 0`. See TODO.md items 1a/1b —
+there is no supported way to requeue dead-lettered audit rows, which sits badly beside
+the relay's own comment that nothing should ever be discarded.
+
+**Verified**: `audit_event_index` 0 → 19 rows; `onboarding_account` outbox 12 pending →
+0; a freshly-relayed `account.otp.*` event returns `valid: true` with both
+`immudbProofValid` and `nashSignatureValid` true.
+
+**Also fixed in passing**: `audit-log` spells its environment out explicitly instead of
+merging the `x-node-service-env` anchor, so it never inherited `KEYCLOAK_PUBLIC_ISSUER`
+from the issuer fix and 401'd every inbound call. Any service with a hand-written env
+block needs that variable repeated — `fhir-gateway` is the other one, though it does
+not currently validate inbound JWTs.

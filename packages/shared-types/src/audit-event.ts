@@ -33,7 +33,22 @@ export type AuditEventType =
   | 'concern.resolved'
   | 'patient.deceased.flagged'
   | 'access.request.granted'
-  | 'access.request.denied';
+  | 'access.request.denied'
+  // Onboarding & Account and Admin Console were already emitting these, but they
+  // were never added here or to audit-log's runtime whitelist, so the Audit Log
+  // Service rejected every one with 400 and their outbox rows retried forever —
+  // i.e. real consent- and identity-relevant actions were silently never recorded.
+  // Found 2026-08-17; see BUILD_LOG/local-build-fixes.md.
+  | 'account.activation.branch_selected'
+  | 'account.activation.identity_verified'
+  | 'account.otp.sent'
+  | 'account.otp.verified'
+  | 'account.passkey_enrolment.prompt_failed'
+  | 'gp_practice.registration_requested'
+  | 'gp_practice.hpio_verified'
+  | 'gp_practice.hpio_verification_failed'
+  | 'gp_practice.compliance_checklist_acknowledged'
+  | 'practice_onboarding_case.opened';
 
 /**
  * The event written to the Audit Log Service — see audit-log-architecture-decision.md.

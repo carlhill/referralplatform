@@ -10,24 +10,51 @@ never built/verified · **[CHORE]** tidy-up.
 
 ---
 
-## 1. [BLOCKER] The audit trail records nothing — immudb writes fail on every attempt
+## 1. ~~[BLOCKER] The audit trail records nothing~~ — **FIXED 2026-08-17**
 
-`audit_log.audit_event_index` has **0 rows** while five services hold 24 unrelayed
-entries in their local `audit_outbox` tables. Every `verifiedSet` fails with
-`verifiedSet dual verification failed` — the client's cryptographic proof check
-rejects the server's response on *every* write, immediately, from a cold start.
+Resolved end-to-end: writes, cryptographic verification, and the outbox relay all
+work. `audit_event_index` went 0 → 19 rows, every running service's outbox drained to
+zero pending, and `POST /audit-events/:id/verify` returns
+`valid: true` with both `immudbProofValid` and `nashSignatureValid` true. It took
+**four** independent bugs, all documented in `BUILD_LOG/local-build-fixes.md`:
 
-Root cause is a version gap: `immudb-node@1.1.1` (client, 2021 — its release notes
-say "Update schema to version 1.1.0 of immudb") against a much newer server. Pinning
-the server to `codenotary/immudb:1.1.0` was attempted and **not** verified before the
-session moved on — `docker-compose.yml` currently pins `1.1.0`, so **confirm whether
-that actually fixed it** before doing anything else here.
+1. immudb server/client version gap (`verifiedSet dual verification failed`) — server
+   pinned to `codenotary/immudb:1.1.0` to match `immudb-node@1.1.1`'s proof format.
+2. That older server rejects underscores in database names, so `IMMUDB_DATABASE` had
+   to change `audit_log` → `auditlog`.
+3. `ImmudbService.verifiedGet` base64-decoded a value the SDK already returns as a
+   plain UTF-8 string, corrupting it so `JSON.parse` threw — which a bare `catch {}`
+   then reported as `immudbProofValid: false`. **The tamper-evidence check was
+   failing on entries that were perfectly intact**, with nothing logged to
+   distinguish a real proof failure from a decode bug. That `catch` now logs.
+4. Ten event types that `onboarding-account` and `admin-console` deliberately emit
+   were missing from both `AuditEventType` and audit-log's runtime whitelist, so
+   every one was rejected with 400 and retried until it hit the attempts cap.
 
-This matters more than its ticket position suggests: an immutable, signed audit trail
-is the platform's core compliance claim, and it currently records nothing. Note also
-there is no actively-maintained Node SDK to upgrade to (all candidates are years
-stale), so if version-pinning fails the options are the `immugw` REST proxy or
-replacing the SDK usage.
+**Residual clean-up, worth a look:** two follow-ons surfaced while fixing this —
+see items 1a and 1b.
+
+## 1a. [BUG] Dead-lettered outbox rows have no recovery path
+
+`AuditOutboxRelayService` stops retrying a row once `attempts` reaches
+`MAX_ATTEMPTS = 8` (`where: { publishedAt: null, attempts: { lt: MAX_ATTEMPTS } }`).
+When the four bugs above were fixed, the affected rows stayed stuck forever because
+they had already exhausted their attempts — they only relayed after a manual
+`UPDATE ... SET attempts = 0`. There is no operational way to requeue them short of
+hand-written SQL, and nothing surfaces that rows are stranded. Given the class
+comment explicitly says nothing should ever be discarded "since a lost entry here
+would silently break the platform's non-repudiation guarantee", a permanently-skipped
+row is exactly that failure in a different costume. Needs at minimum an alert/metric,
+and probably an admin requeue endpoint.
+
+## 1b. [GAP] Outbox schemas are inconsistent across services
+
+`onboarding_account.audit_outbox` has `attempts` and `lastError` columns;
+`specialist_review.audit_outbox` and `admin_console.audit_outbox` do **not**. So the
+retry cap and the error diagnostics that made item 1a debuggable simply don't exist in
+some services. Reconcile the Prisma schemas. (Those two services still have pending
+rows purely because they were stopped to save RAM, not because of a bug — they should
+drain when started, and that should be confirmed.)
 
 ## 2. [BLOCKER] A new clinician cannot sign in at all — the login flow can't enrol a passkey
 

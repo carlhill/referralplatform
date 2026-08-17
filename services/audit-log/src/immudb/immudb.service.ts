@@ -85,8 +85,16 @@ export class ImmudbService implements OnModuleInit {
     if (!entry) {
       throw new Error(`immudb verifiedGet returned no entry for key '${key}' (not found, or proof failed)`);
     }
-    // Entry.toObject() base64-encodes key/value (see immudb-node's generated
-    // proto toObject) — decode back to the UTF-8 JSON string we wrote.
-    return { txId: String(entry.tx), value: Buffer.from(entry.value, 'base64').toString('utf8') };
+    // NOTE: an earlier version assumed Entry.toObject() base64-encodes `value`
+    // and did Buffer.from(value, 'base64'). It does not — immudb-node@1.1.1's
+    // verifiedGet resolves `value` as an already-decoded UTF-8 string. Running it
+    // through a base64 decode turned valid JSON into garbage, so JSON.parse threw
+    // in the caller and every /audit-events/:id/verify reported the immudb proof
+    // as INVALID — i.e. the tamper-evidence check failed on entries that were in
+    // fact perfectly intact. Verified against a live immudb 1.1.0 by calling
+    // verifiedGet directly: it returns `typeof value === 'string'` holding the
+    // exact JSON envelope that was written. See BUILD_LOG/local-build-fixes.md.
+    const value = typeof entry.value === 'string' ? entry.value : Buffer.from(entry.value).toString('utf8');
+    return { txId: String(entry.tx), value };
   }
 }

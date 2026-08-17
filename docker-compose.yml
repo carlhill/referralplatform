@@ -411,13 +411,21 @@ services:
       PORT: 3012
       REDIS_URL: redis://redis:6379
       KEYCLOAK_ISSUER: http://keycloak:8080/realms/referralplatform
+      # This service spells its env out rather than merging *node-service-env, so it
+      # does NOT inherit KEYCLOAK_PUBLIC_ISSUER from the anchor — it must be repeated
+      # here or every inbound token 401s. See BUILD_LOG/local-build-fixes.md.
+      KEYCLOAK_PUBLIC_ISSUER: http://localhost:20004/realms/referralplatform
       KEYCLOAK_CLIENT_ID: audit-log-service
       KEYCLOAK_CLIENT_SECRET: change-me-in-local-env
       DATABASE_URL: postgresql://referralplatform:referralplatform@postgres:5432/referralplatform?schema=audit_log
       IMMUDB_ADDRESS: immudb:3322
       IMMUDB_USERNAME: immudb
       IMMUDB_PASSWORD: change-me-in-local-env
-      IMMUDB_DATABASE: audit_log
+      # NOT `audit_log` — immudb 1.1.0 rejects underscores ("punctuation marks and
+      # symbols are not allowed in database name"). The server is pinned to 1.1.0 to
+      # match immudb-node@1.1.1's proof format (see BUILD_LOG/local-build-fixes.md),
+      # and that older server has stricter database-name validation than current ones.
+      IMMUDB_DATABASE: auditlog
       # NOTE: previously pointed at /run/secrets/local-dev-only-nash-key.pem, but
       # this compose file defines no `secrets:` for this service, so that path
       # doesn't exist and isn't writable — MockNashSigner's first-run keygen would

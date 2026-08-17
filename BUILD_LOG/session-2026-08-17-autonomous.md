@@ -3,7 +3,9 @@
 Written for Carl to pick up cold. Covers the work done while you were away, what is
 verified, what is not, and where the traps are.
 
-**Headline:** 7 bugs fixed, each verified before committing. Full test suite green —
+**Test results per workspace:** [`TEST-RESULTS.md`](../TEST-RESULTS.md).
+
+**Headline:** 8 bugs fixed, each verified before committing. Full test suite green —
 113 suites / 577 tests, exit 0, under both `Australia/Sydney` and `UTC`. All 13
 services now report `healthy`. The stack is up and your `gp.test` passkey is intact,
 so you can start manual testing straight away.
@@ -115,7 +117,17 @@ never be satisfied, deadlocking an orchestrated startup that relied on it.
 All 13 now probe `127.0.0.1`. Verified: `audit-log`, `identity-access`,
 `gp-authorisation`, `referral` all flipped to `healthy`.
 
-### 6. Specs broken by the outbox extraction (`a063795`)
+### 6. `fhir-gateway` image was stale (healthcheck fix never rebuilt)
+
+Its Dockerfile healthcheck was corrected with the other 12, but the image dated from
+2026-08-14 and had never been rebuilt, so it still probed `localhost` and would have
+kept reporting `unhealthy`. Caught by comparing the healthcheck baked *into each image*
+against the source, rather than trusting that "I fixed the Dockerfiles" meant the images
+were current. Rebuilt; now reports `healthy`.
+
+All 14 images are now current with the committed source.
+
+### 7. Specs broken by the outbox extraction (`a063795`)
 
 Two regressions of mine from the previous round: `PasskeysService` and
 `AccountLinksService` take an `AuditOutboxService` where they previously took

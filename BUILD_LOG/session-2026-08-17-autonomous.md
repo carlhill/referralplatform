@@ -212,3 +212,87 @@ want to leave you a pile of plausible-looking changes to audit, and the remainin
 items are ones where the honest next step is either a design decision (patient OTP flow,
 per-practice timezones) or manual testing that only you can do. The items I did take on
 were the ones I could prove.
+
+---
+
+# Part 2 — structural improvements
+
+The four weaknesses flagged at the end of part 1, now addressed. Each was chosen because
+it would have *prevented* one of the bugs found earlier, rather than fixing another
+symptom.
+
+### A. Removed the `AuditEventType` cast escape hatches (`8efe5b8`)
+
+Three services declared a local event-type union and cast at the call site, on a comment
+asserting the Audit Log Service "accepts type as an opaque string over the wire". It does
+not. Every event written that way was rejected with 400 — and where there was no outbox,
+discarded outright. That is how passkey revocations went unrecorded.
+
+All 35 types are now canonical, verified before removing anything, so the casts were pure
+liability. The helper files are replaced with tombstones explaining why the pattern is
+gone, and a `no-restricted-syntax` ESLint rule blocks reintroducing it — with one scoped
+exemption for the shared relay, which genuinely deserialises a string from Postgres.
+Verified the rule fires on a re-introduced cast.
+
+### B. Drift check for the duplicated `AuditOutbox` models (`ff0675f`)
+
+Prisma has no include/import, so the outbox model is hand-copied into all eleven
+services — the one thing that could not move into the shared package is also the thing
+most likely to diverge, and it had. `npm run validate:outbox` compares every model field
+by field. Verified both directions: passes now, and when the historical drift is
+reproduced it names the field, the variant and the odd service out.
+
+### C. Production guard on placeholder secrets (`2100e48`)
+
+`change-me-in-local-env` appears 18× in compose and 14× in the realm file, with
+`admin`/`admin` and `referralplatform:referralplatform` alongside. Nothing stopped them
+reaching a deployment. `ServiceTokenProvider` now refuses to construct when
+`NODE_ENV=production` and the secret is a known placeholder — failing at boot rather than
+serving traffic on a credential readable off GitHub. Inert outside production, because
+local dev, CI and every test here run on exactly those values and a guard that fired
+everywhere would simply be disabled. Verified both directions in a real service image.
+
+**This is a backstop, not a secrets strategy** — it covers only the Keycloak client
+secret, and cannot help with the realm file. Recorded as TODO 14.
+
+### D. Integration test tier (`27dc100`)
+
+The most valuable of the four. Every serious bug this session was invisible to the unit
+suite — 577 tests green throughout — because each lived in a *seam*: the issuer mismatch
+only appears for a token minted over the host port, the audit trail's bugs only against a
+real immudb, the healthcheck bug only inside Docker, Keycloak's flow behaviour only in
+Keycloak.
+
+14 tests over three files assert those seams. Three deliberate conventions: fail loudly
+when the stack is down (a tier that silently passes is worse than none), assert over
+host-published ports (the Docker network would have hidden the issuer bug — that
+asymmetry *was* the bug), and name the incident each test guards rather than the feature.
+
+**Verified it catches regressions, not just that it passes:** re-running `referral` in
+its pre-fix configuration fails with `Expected: not 401`, the exact assertion written for
+that bug, and returns to green when restored.
+
+---
+
+## Final state
+
+| | |
+| --- | --- |
+| Unit suite | 585 tests, 0 failed (`Australia/Sydney` and `UTC`) |
+| Integration suite | 14 tests, 0 failed, against the live stack |
+| Static validators | realm import + outbox schema, both OK |
+| Containers | all running services `healthy` |
+| Git | everything committed and pushed |
+
+## What I would do next, in order
+
+1. **Manual testing** — `specialist-portal` and `patient-web` have still never been
+   opened. Most likely place to find something new.
+2. **Extend the integration tier** as bugs are found — it is now the cheapest place to
+   pin a regression, and the pattern is established.
+3. **Real secrets management** (TODO 14) before any deployment beyond this laptop.
+4. **Playwright** (TODO 10) — never run; expect locator churn.
+5. **Patient OTP flow** (TODO 2b) — `conditional-user-configured` sits loose in a
+   basic-flow, likely making OTP unconditional. Left alone deliberately: changing auth
+   behaviour without a way to verify it is how the clinician flow broke in the first
+   place.

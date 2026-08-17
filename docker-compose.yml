@@ -53,6 +53,11 @@ x-node-service-env: &node-service-env
   KEYCLOAK_PUBLIC_ISSUER: http://localhost:20004/realms/referralplatform
   AUDIT_LOG_SERVICE_URL: http://audit-log:3012
 
+# NOTE: service healthchecks target 127.0.0.1, never `localhost`. Inside these
+# containers `localhost` resolves to ::1 (IPv6) while the Node apps listen IPv4-only on
+# 0.0.0.0, so a `localhost` probe gets "connection refused" and every service sits
+# `unhealthy` while serving traffic perfectly well. That also means any
+# `depends_on: condition: service_healthy` on such a service would never be satisfied.
 x-healthcheck-defaults: &healthcheck-defaults
   interval: 15s
   timeout: 5s

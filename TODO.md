@@ -262,7 +262,25 @@ other nine are unverified. `audit-log` in particular never started during the fi
 check. Per `CLAUDE.md`'s working style, each should be brought up and confirmed
 individually (health + one authenticated call) rather than assumed.
 
-## 5. [BUG] Several services sit `unhealthy` and nobody has diagnosed why
+## 5. ~~[BUG] Several services sit `unhealthy`~~ — **FIXED 2026-08-17**
+
+One shared cause across all 13, as suspected: every Dockerfile's `HEALTHCHECK` probed
+`http://localhost:<port>/health`, but inside these containers `localhost` resolves to
+**::1 (IPv6)** while the Node server listens IPv4-only on `0.0.0.0`. So the probe got
+"connection refused" and the container sat `unhealthy` while serving traffic perfectly
+well — `GET :20011/health` returned 200 from the host at the same moment.
+
+Proven inside the container: `wget localhost:3005/health` → refused,
+`wget 127.0.0.1:3005/health` → OK, `getent hosts localhost` → `::1`.
+
+All 13 now probe `127.0.0.1`. Verified: `audit-log`, `identity-access`,
+`gp-authorisation` and `referral` all flipped to `healthy` after rebuild.
+
+This was more than cosmetic — a `depends_on: condition: service_healthy` on any of
+these would never have been satisfied, so it would have deadlocked an orchestrated
+startup that relied on it.
+
+## 5-original. [ORIGINAL ANALYSIS — kept for context]
 
 Observed earlier: `directory`, `audit-log`, `followup-recall`, `specialist-review`,
 `consent-security`, `referral`, `gp-authorisation` all reporting `unhealthy` while

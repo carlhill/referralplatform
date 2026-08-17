@@ -38,5 +38,10 @@ ENV NODE_ENV=production
 WORKDIR /workspace
 COPY --from=builder /workspace /workspace
 EXPOSE 3007
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD wget -qO- http://localhost:3007/health || exit 1
+# Probe 127.0.0.1, never `localhost`: inside these containers `localhost` resolves to
+# ::1 (IPv6) while the Node server listens IPv4-only on 0.0.0.0, so a `localhost`
+# probe gets "connection refused" and the container sits `unhealthy` while serving
+# traffic perfectly well - which also means any `depends_on: service_healthy` on it
+# would never be satisfied. See BUILD_LOG/local-build-fixes.md.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD wget -qO- http://127.0.0.1:3007/health || exit 1
 CMD ["node", "services/booking/dist/main.js"]

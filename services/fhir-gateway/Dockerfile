@@ -25,5 +25,10 @@ FROM eclipse-temurin:21-jre-alpine AS runtime
 WORKDIR /app
 COPY --from=builder /build/target/fhir-gateway.jar ./fhir-gateway.jar
 EXPOSE 3013
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD wget -qO- http://localhost:3013/actuator/health || exit 1
+# Probe 127.0.0.1, never `localhost`: inside these containers `localhost` resolves to
+# ::1 (IPv6) while the Node server listens IPv4-only on 0.0.0.0, so a `localhost`
+# probe gets "connection refused" and the container sits `unhealthy` while serving
+# traffic perfectly well - which also means any `depends_on: service_healthy` on it
+# would never be satisfied. See BUILD_LOG/local-build-fixes.md.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD wget -qO- http://127.0.0.1:3013/actuator/health || exit 1
 ENTRYPOINT ["java", "-jar", "fhir-gateway.jar"]

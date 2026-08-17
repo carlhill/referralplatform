@@ -279,7 +279,16 @@ auth failure. That's how the issuer bug stayed invisible on that screen. It shou
 distinguish "request failed" from "request succeeded, zero results". Worth auditing
 the other dashboards for the same pattern.
 
-## 7. [BUG] `gp-portal` callback misreports a successful login
+## 7. ~~[BUG] `gp-portal` callback misreports a successful login~~ — **FIXED 2026-08-17**
+
+`handleCallback` now treats a code-less callback as a duplicate rather than a failure
+when a valid session is already stored and no PKCE handshake is in flight — it
+redirects on instead of rendering "start sign-in again" at a user who is demonstrably
+signed in. Keycloak produces exactly that callback (`error=already_logged_in`) when a
+second authorization request races the first, which is what the required-action
+redirect chain does after passkey enrolment.
+
+## 7-original. [ORIGINAL ANALYSIS — kept for context]
 
 After a genuine successful sign-in, `/callback` can show "Missing authorization code,
 state, or PKCE verifier — start sign-in again" while the nav simultaneously shows the
@@ -344,7 +353,11 @@ hand via API calls. It has never executed against a live stack. Expect locator f
 on first run. Note it will also hit items 2 and 3 (it drives all three web apps
 through real browser logins), so those likely need fixing first.
 
-## 11. [CHORE] Debug logging left enabled on Keycloak
+## 11. ~~[CHORE] Debug logging left enabled on Keycloak~~ — **FIXED 2026-08-17**
+
+`KC_LOG_LEVEL` removed from `docker-compose.yml`; Keycloak is back to default logging.
+
+## 11-original. [ORIGINAL ANALYSIS — kept for context]
 
 `KC_LOG_LEVEL: 'info,org.keycloak.authentication:debug'` is still set in
 `docker-compose.yml` from tonight's troubleshooting. It's noisy — revert once items 2

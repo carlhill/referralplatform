@@ -58,14 +58,29 @@ export interface CallbackResult {
 
 /** Completes the flow on `/callback`: validates `state`, exchanges `code` for tokens. */
 export async function handleCallback(searchParams: URLSearchParams): Promise<CallbackResult> {
+  const code = searchParams.get('code');
+  const state = searchParams.get('state');
+  const stored = sessionStorage.getItem(PKCE_STORAGE_KEY);
   const error = searchParams.get('error');
+
+  // A callback carrying no authorization code, arriving when we hold a valid session
+  // and have no handshake in flight, is not a failure — it is a duplicate. Keycloak
+  // bounces back here with `error=already_logged_in` when a second authorization
+  // request races the first (which is what the required-action redirect chain does
+  // after passkey enrolment). Telling a user who IS signed in to "start sign-in again"
+  // hides a working session behind an error page; it was reported as a bug for exactly
+  // that reason. Redirect them on instead.
+  if (!code) {
+    const existing = loadStoredTokens();
+    if (existing && !isTokenSetExpired(existing) && !stored) {
+      return { tokens: existing, postLoginPath: takePostLoginPath() };
+    }
+  }
+
   if (error) {
     throw new Error(searchParams.get('error_description') ?? `Keycloak returned an error: ${error}`);
   }
 
-  const code = searchParams.get('code');
-  const state = searchParams.get('state');
-  const stored = sessionStorage.getItem(PKCE_STORAGE_KEY);
   if (!code || !state || !stored) {
     throw new Error('Missing authorization code, state, or PKCE verifier — start sign-in again.');
   }
@@ -78,9 +93,14 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<Cal
   const tokens = await exchangeCode(code, codeVerifier);
   storeTokens(tokens);
 
-  const postLoginPath = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY) ?? '/';
+  return { tokens, postLoginPath: takePostLoginPath() };
+}
+
+/** Reads and clears the path the user was heading to before being sent to Keycloak. */
+function takePostLoginPath(): string {
+  const path = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY) ?? '/';
   sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
-  return { tokens, postLoginPath };
+  return path;
 }
 
 async function exchangeCode(code: string, codeVerifier: string): Promise<TokenSet> {

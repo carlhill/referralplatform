@@ -122,7 +122,6 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: change-me-in-local-env
       KC_DB: dev-file
       KC_HEALTH_ENABLED: 'true'
-      KC_LOG_LEVEL: 'info,org.keycloak.authentication:debug'
       # Without this, Keycloak builds the `iss` claim from whichever host the token
       # request arrived on — so browser tokens (via localhost:20004) and internal
       # service tokens (via keycloak:8080) got DIFFERENT issuers, and backends could

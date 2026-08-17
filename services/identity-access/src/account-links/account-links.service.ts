@@ -2,10 +2,9 @@ import { randomBytes, createHash } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedPrincipal } from '@referralplatform/auth-client';
-import { AuditClient } from '@referralplatform/audit-client';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { createAuditClient } from '../common/clients';
+import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
 import { asAuditEventType } from '../common/audit/identity-audit-events';
 import type { KnownClientId } from './dto/create-link-url.dto';
 
@@ -31,15 +30,12 @@ const LINK_REQUEST_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class AccountLinksService {
-  private readonly auditClient: AuditClient;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly keycloakAdmin: KeycloakAdminService,
     private readonly config: ConfigService,
-  ) {
-    this.auditClient = createAuditClient(config);
-  }
+    private readonly auditOutbox: AuditOutboxService,
+  ) {}
 
   private assertLinkable(provider: string): asserts provider is LinkableProvider {
     if (!(LINKABLE_PROVIDERS as readonly string[]).includes(provider)) {
@@ -131,7 +127,7 @@ export class AccountLinksService {
   async unlink(principal: AuthenticatedPrincipal, provider: string): Promise<void> {
     this.assertLinkable(provider);
     await this.keycloakAdmin.removeFederatedIdentity(principal.sub, provider);
-    await this.auditClient.record({
+    await this.auditOutbox.enqueueStandalone({
       type: asAuditEventType('identity.social_link.removed'),
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'FederatedIdentity', id: `${principal.sub}:${provider}` },
@@ -151,7 +147,7 @@ export class AccountLinksService {
       throw new BadRequestException('No matching, unexpired account-link request for this nonce');
     }
     await this.prisma.accountLinkRequest.update({ where: { nonce }, data: { consumedAt: new Date() } });
-    await this.auditClient.record({
+    await this.auditOutbox.enqueueStandalone({
       type: asAuditEventType('identity.social_link.created'),
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'FederatedIdentity', id: `${principal.sub}:${provider}` },

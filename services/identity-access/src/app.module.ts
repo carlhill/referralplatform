@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { KeycloakAdminModule } from './keycloak-admin/keycloak-admin.module';
 import { PasskeysModule } from './passkeys/passkeys.module';
+import { AuditOutboxModule } from './audit-outbox/audit-outbox.module';
 import { PasskeysController } from './passkeys/passkeys.controller';
 import { AccountLinksModule } from './account-links/account-links.module';
 import { AccountLinksController } from './account-links/account-links.controller';
@@ -34,6 +35,7 @@ import { createTokenVerifier } from './common/clients';
   imports: [
     // Powers PasskeysModule's ClinicianCredentialReconciler sweep.
     ScheduleModule.forRoot(),
+    AuditOutboxModule,
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     HealthModule,
     PrismaModule,

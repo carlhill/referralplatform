@@ -60,3 +60,29 @@ model AccountLinkRequest {
   @@index([principalId])
   @@index([expiresAt])
 }
+
+/// Durable queue for this service's IAM audit events (root CONVENTIONS.md §7).
+///
+/// These were previously written with direct `AuditClient.record()` calls, on the
+/// documented reasoning that IAM events have no clinical transaction to stay atomic
+/// with. That reasoning holds — but durability was the unexamined half: a direct
+/// write that fails is simply gone. That happened for real (every `identity.*` type
+/// was missing from the Audit Log Service's whitelist, so every write 400'd and was
+/// discarded), which meant passkey revocations — exactly what an incident review
+/// needs — were never recorded. Queuing here instead means an Audit Log Service
+/// outage or a validation change delays events rather than destroying them.
+model AuditOutbox {
+  id          String    @id @default(uuid())
+  type        String
+  actor       Json
+  subjectType String
+  subjectId   String
+  payload     Json
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt])
+  @@map("audit_outbox")
+}

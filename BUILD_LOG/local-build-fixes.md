@@ -388,3 +388,39 @@ comment contained a semicolon ("Found 2026-08-17; see BUILD_LOG..."), which trun
 the parse and made every member after it look absent. The test caught its own bug on
 first run; comments are now stripped first, whole-line `//` only so a `https://` in
 prose can't eat its line.
+
+## IAM audit events moved onto the outbox (2026-08-17)
+
+`identity-access` wrote its IAM events (passkey revoked, re-enrolment required, social
+link created/removed, bootstrap password removed) with direct `AuditClient.record()`
+calls. Root CONVENTIONS.md §7 permits that for "genuinely non-clinical, non-consent
+events", and the reasoning held as far as it went — there is no clinical transaction
+for these to stay atomic with. The unexamined half was durability: a direct write that
+fails is simply gone. That is what turned the whitelist drift found earlier the same
+day into permanent loss of passkey-revocation records rather than a retry.
+
+Added the standard outbox to this service (`src/audit-outbox/` — types, writer, relay,
+module; `AuditOutbox` model; migration `20260817051958_add_audit_outbox`) and converted
+all five call sites. The relay mirrors `onboarding-account`'s so there is one behaviour
+to reason about, with one addition: a row that exhausts its attempts is now logged at
+error level as `STRANDED`, because in the other services such a row is silently dropped
+from the poll query forever with nothing surfacing it.
+
+**Verified against a real outage, not assumed.** With `audit-log` stopped, a triggered
+event stayed in the outbox (`relayed=f, attempts=6, lastError='fetch failed'`) instead
+of being discarded, and reached the audit trail after the service came back.
+
+**That test also measured how shallow the platform's durability really is.** The queued
+event hit `MAX_ATTEMPTS = 8` *during the outage*, and the relay then skipped it
+permanently. At a 5-second poll interval that is a **40-second total retry budget** —
+less than the time `audit-log` takes to restart. So a routine deploy of the Audit Log
+Service can permanently strand audit records in every service using this relay. It
+recovered only after a manual `UPDATE ... SET attempts = 0`, the same hand-operation
+needed earlier in the day.
+
+That reframes TODO 1a: it is not a visibility nicety, it is a bug that loses audit
+records during normal operations, and the retry policy needs exponential backoff with a
+much longer (or absent) give-up horizon. For an audit trail, retrying for hours should
+always beat discarding. Left unfixed here deliberately — changing retry semantics in
+one service while five others keep the old policy would be worse than fixing all of
+them together, and it needs a schema column (`nextAttemptAt`) to do properly.

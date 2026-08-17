@@ -1,9 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedPrincipal } from '@referralplatform/auth-client';
-import { AuditClient } from '@referralplatform/audit-client';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
-import { createAuditClient } from '../common/clients';
+import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
 import { asAuditEventType } from '../common/audit/identity-audit-events';
 
 export interface PasskeySummary {
@@ -32,14 +30,10 @@ const WEBAUTHN_CREDENTIAL_TYPES = new Set(['webauthn', 'webauthn-passwordless'])
  */
 @Injectable()
 export class PasskeysService {
-  private readonly auditClient: AuditClient;
-
   constructor(
     private readonly keycloakAdmin: KeycloakAdminService,
-    config: ConfigService,
-  ) {
-    this.auditClient = createAuditClient(config);
-  }
+    private readonly auditOutbox: AuditOutboxService,
+  ) {}
 
   async list(principal: AuthenticatedPrincipal): Promise<PasskeySummary[]> {
     const credentials = await this.keycloakAdmin.listCredentials(principal.sub);
@@ -65,7 +59,7 @@ export class PasskeysService {
 
     await this.keycloakAdmin.deleteCredential(principal.sub, credentialId);
 
-    await this.auditClient.record({
+    await this.auditOutbox.enqueueStandalone({
       type: asAuditEventType('identity.passkey.revoked'),
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'WebAuthnCredential', id: credentialId },
@@ -82,7 +76,7 @@ export class PasskeysService {
 
     await this.keycloakAdmin.addRequiredAction(principal.sub, action);
 
-    await this.auditClient.record({
+    await this.auditOutbox.enqueueStandalone({
       type: asAuditEventType('identity.passkey.reenrolment_required'),
       actor: { principalType: principal.principalType, id: principal.sub },
       subject: { type: 'Principal', id: principal.sub },

@@ -110,7 +110,39 @@ throughout `BUILD_LOG/local-build-fixes.md` no longer works for that user — an
 reconciler will now actively strip any password re-added to an enrolled clinician. Use
 `specialist.test` (still bootstrapped) or a service account instead.
 
-## 2d. [GAP] identity-access writes audit events directly, so failures lose them
+## 2d. ~~[GAP] identity-access writes audit events directly, so failures lose them~~ — **FIXED 2026-08-17**
+
+`identity-access` now has the standard outbox (`src/audit-outbox/`, `AuditOutbox`
+model + migration `20260817051958_add_audit_outbox`), and all five IAM call sites —
+passkey revoke, re-enrolment required, social link created/removed, bootstrap password
+removed — enqueue instead of calling the Audit Log Service in the request path.
+
+Proven against a real outage rather than assumed: with `audit-log` stopped, a triggered
+event was retained in the outbox (`relayed=f, attempts=6, lastError='fetch failed'`)
+where the old direct write would simply have discarded it, and it reached the audit
+trail once the service returned.
+
+**But that test also exposed how shallow the durability actually is — see 1a.**
+
+## 1a-addendum. [BUG] Measured: a ~40-second outage permanently strands an audit event
+
+While testing the above, the queued event hit `MAX_ATTEMPTS = 8` *during the outage
+itself* and was permanently skipped. With a 5-second poll and a cap of 8, the retry
+budget is **40 seconds** — shorter than the time `audit-log` takes to restart. So an
+ordinary deploy or restart of the Audit Log Service can permanently strand audit
+records, in every service using this relay, not just this one.
+
+It only recovered because I ran `UPDATE ... SET attempts = 0` by hand, which is the
+same manual step item 1a already describes and still the only way back.
+
+This makes 1a materially more urgent than its original wording suggested: it is not a
+tidiness issue about visibility, it is a bug that loses audit records during routine
+operations. The retry policy needs exponential backoff and a far longer (or no) give-up
+horizon — losing an audit entry should be strictly worse than retrying for hours.
+`identity-access`'s relay at least now logs `STRANDED ...` at error level when a row
+gives up (verified firing); the other services still fail silently.
+
+## 2d-original. [ORIGINAL ANALYSIS — kept for context]
 
 `identity-access` writes IAM events (`identity.passkey.revoked`,
 `identity.bootstrap_password.removed`, …) with direct `auditClient.record()` calls

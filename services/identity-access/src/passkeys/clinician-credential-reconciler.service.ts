@@ -1,9 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
-import { AuditClient } from '@referralplatform/audit-client';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
-import { createAuditClient } from '../common/clients';
+import { AuditOutboxService } from '../audit-outbox/audit-outbox.service';
 import { asAuditEventType } from '../common/audit/identity-audit-events';
 
 /** Realm roles whose holders must authenticate with a passkey only (AAL2/AAL3). */
@@ -44,15 +42,12 @@ const RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
 @Injectable()
 export class ClinicianCredentialReconciler implements OnApplicationBootstrap {
   private readonly logger = new Logger(ClinicianCredentialReconciler.name);
-  private readonly auditClient: AuditClient;
   private running = false;
 
   constructor(
     private readonly keycloakAdmin: KeycloakAdminService,
-    config: ConfigService,
-  ) {
-    this.auditClient = createAuditClient(config);
-  }
+    private readonly auditOutbox: AuditOutboxService,
+  ) {}
 
   /**
    * Converge once at startup rather than waiting a full interval. Without this, a
@@ -125,15 +120,17 @@ export class ClinicianCredentialReconciler implements OnApplicationBootstrap {
     // authenticate, so it belongs in the audit trail even though the platform, not
     // a human, initiated it.
     //
-    // Deliberately non-fatal, for two reasons. First, the deletion has already
-    // happened — throwing here cannot undo it, it would only abandon the rest of
-    // the sweep and leave other clinicians sitting at AAL1. Second, this is a
-    // direct (non-outbox) audit write, so a failure means the record is genuinely
-    // lost rather than retried; that deserves a loud, specific error naming the
-    // account, not a generic sweep failure. See TODO 2d — IAM events arguably
-    // belong on the outbox for exactly this reason.
+    // This enqueues onto the outbox rather than calling the Audit Log Service, so a
+    // service outage or validation change delays the record instead of destroying
+    // it — the relay retries. Failure here therefore means the *local database*
+    // write failed, which is both far less likely and a much bigger problem.
+    //
+    // Still non-fatal: the credential deletion has already happened, and throwing
+    // cannot undo it — it would only abandon the sweep and leave other clinicians
+    // sitting at AAL1. But it is logged loudly and names the account, because at
+    // that point a credential changed with no durable record of it.
     try {
-      await this.auditClient.record({
+      await this.auditOutbox.enqueueStandalone({
         type: asAuditEventType('identity.bootstrap_password.removed'),
         actor: { principalType: 'system', id: 'identity-access.clinician-credential-reconciler' },
         subject: { type: 'Principal', id: userId },

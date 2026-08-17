@@ -42,7 +42,15 @@
 x-node-service-env: &node-service-env
   NODE_ENV: development
   REDIS_URL: redis://redis:6379
+  # The Docker-internal URL services USE to reach Keycloak (JWKS, token endpoint,
+  # Admin API). Must stay internal — containers cannot resolve localhost:20004.
   KEYCLOAK_ISSUER: http://keycloak:8080/realms/referralplatform
+  # What tokens actually CARRY as `iss` — Keycloak stamps its KC_HOSTNAME (set on
+  # the keycloak service below), not whichever host the request arrived on. Browser
+  # tokens carry this value; validating them against KEYCLOAK_ISSUER 401'd every
+  # browser-originated call while service-to-service calls kept working. See
+  # BUILD_LOG/local-build-fixes.md, "Keycloak issuer mismatch".
+  KEYCLOAK_PUBLIC_ISSUER: http://localhost:20004/realms/referralplatform
   AUDIT_LOG_SERVICE_URL: http://audit-log:3012
 
 x-healthcheck-defaults: &healthcheck-defaults
@@ -115,6 +123,13 @@ services:
       KC_DB: dev-file
       KC_HEALTH_ENABLED: 'true'
       KC_LOG_LEVEL: 'info,org.keycloak.authentication:debug'
+      # Without this, Keycloak builds the `iss` claim from whichever host the token
+      # request arrived on — so browser tokens (via localhost:20004) and internal
+      # service tokens (via keycloak:8080) got DIFFERENT issuers, and backends could
+      # only ever validate one of them. Pinning it makes every token carry the same
+      # issuer regardless of arrival path; services still reach Keycloak internally
+      # via KEYCLOAK_ISSUER. See BUILD_LOG/local-build-fixes.md.
+      KC_HOSTNAME: http://localhost:20004
     ports:
       - '20004:8080' # OIDC issuer for local dev: http://localhost:20004/realms/referralplatform
     volumes:

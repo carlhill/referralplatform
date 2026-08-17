@@ -254,3 +254,49 @@ merging the `x-node-service-env` anchor, so it never inherited `KEYCLOAK_PUBLIC_
 from the issuer fix and 401'd every inbound call. Any service with a hand-written env
 block needs that variable repeated — `fhir-gateway` is the other one, though it does
 not currently validate inbound JWTs.
+
+## Clinician login flow — enrolment dead-end and two ignored executions (2026-08-17)
+
+**The dead end.** `clinician-browser Forms` ran `auth-username-form` (REQUIRED) then
+`webauthn-authenticator-passwordless` (REQUIRED). Per Keycloak's
+`AuthenticationSelectionResolver`, once the username step resolves a user the WebAuthn
+execution is only *selectable* if that user already holds a matching credential —
+`userSetupAllowed: true` does not create an inline "register one now" path. So every
+clinician who had never enrolled a passkey hit `Cannot login, credential setup
+required`, with no way forward. That is a production onboarding defect: it is not
+possible to onboard a GP or specialist through the product at all.
+
+Restructured to `auth-username-form` (REQUIRED) → new `clinician-browser Credential`
+sub-flow (REQUIRED) containing `webauthn-authenticator-passwordless` (ALTERNATIVE) and
+`auth-password-form` (ALTERNATIVE). Keycloak only offers a branch the user actually has
+a credential for, so this yields passkey-only for enrolled clinicians and a password
+bootstrap for new ones, without a `NOT configured` condition (which Keycloak's flow
+model can't express).
+
+Verified by driving the real login endpoint with PKCE for both users:
+
+- `gp.test` (passkey enrolled, password deleted) → **passkey prompt only**
+- `specialist.test` (bootstrap password, no passkey) → **password form**, and after
+  submitting it, the **Passkey Registration** required-action page
+
+**The security requirement is preserved by provisioning, not by the flow.**
+`identity-security-recommendations.md` §6 requires passkey/hardware key to be mandatory
+for clinicians (AAL2/AAL3). What actually enforces that here is an enrolled clinician
+having **no password credential** — while `gp.test` still had one, the probe showed the
+password form being offered *instead of* the passkey, i.e. a silent drop to AAL1.
+Deleting the password produced the correct passkey-only prompt. So the rule
+"bootstrap password is issued once, then removed on enrolment" is load-bearing and is
+currently enforced by nothing at all — see TODO 2a.
+
+**Two executions were being silently ignored.** Both `clinician-browser` and
+`patient-carer-browser` had their `Forms` sub-flow as REQUIRED while `Cookie` (and, in
+the patient flow, `Identity Provider Redirector`) sat beside it as ALTERNATIVE.
+Keycloak logs `REQUIRED and ALTERNATIVE elements at same level! Those alternative
+executions will be ignored: [auth-cookie]` on every login — it had been in the logs all
+session and was easy to read past. Consequences: **SSO cookie re-authentication never
+worked** (every navigation forced a full re-auth, which is also why the duplicate
+`already_logged_in` callback kept appearing), and in the patient flow **the mock-myID
+identity-provider redirector could never fire**, so the TDIF path was unreachable
+regardless of how it was configured. Both `Forms` sub-flows are now ALTERNATIVE
+siblings, matching Keycloak's own stock browser flow shape. The warning no longer
+appears.

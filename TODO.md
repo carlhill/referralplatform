@@ -56,7 +56,56 @@ some services. Reconcile the Prisma schemas. (Those two services still have pend
 rows purely because they were stopped to save RAM, not because of a bug — they should
 drain when started, and that should be confirmed.)
 
-## 2. [BLOCKER] A new clinician cannot sign in at all — the login flow can't enrol a passkey
+## 2. ~~[BLOCKER] A new clinician cannot sign in at all~~ — **FIXED 2026-08-17**
+
+`clinician-browser Forms` now runs `auth-username-form` (REQUIRED) → a new
+`clinician-browser Credential` sub-flow (REQUIRED) holding
+`webauthn-authenticator-passwordless` (ALTERNATIVE) and `auth-password-form`
+(ALTERNATIVE). Keycloak only offers a branch the user actually holds a credential for,
+which gives exactly the required behaviour:
+
+| user | offered | verified |
+| --- | --- | --- |
+| enrolled clinician (passkey, **no** password) | passkey only | `gp.test` → PASSKEY PROMPT |
+| new clinician (bootstrap password, no passkey) | password, then **forced** enrolment | `specialist.test` → PASSWORD FORM → Passkey Registration |
+
+AAL2/AAL3 is preserved because an enrolled clinician has no password credential to
+fall back to — **not** because the flow forbids it. See item 2a: nothing enforces that
+yet.
+
+Also fixed in both `clinician-browser` and `patient-carer-browser`: the `Forms`
+sub-flow was REQUIRED while `Cookie` (and, in the patient flow, `Identity Provider
+Redirector`) sat beside it as ALTERNATIVE. Keycloak logged
+`REQUIRED and ALTERNATIVE elements at same level! Those alternative executions will be
+ignored` on every single login — meaning **SSO cookie re-authentication never worked**
+(full re-auth every time) and, in the patient flow, **the myID/TDIF identity-provider
+redirector could never fire at all**. Both sub-flows are now ALTERNATIVE siblings.
+
+## 2a. [GAP] Nothing enforces "clinicians hold no password"
+
+The whole AAL2/AAL3 guarantee above rests on an enrolled clinician having no password
+credential — enforced today only by my having deleted `gp.test`'s password by hand.
+Provisioning must: issue a one-time bootstrap password, set the
+`webauthn-register-passwordless` required action, and **delete the password once
+enrolment completes**. Until that exists, any clinician who keeps a password can log in
+with it, silently dropping to AAL1. Worth also adding a periodic check for clinician
+accounts holding a password credential.
+
+Note for testing: `gp.test` no longer has a password, so the ROPC/password grant used
+throughout `BUILD_LOG/local-build-fixes.md` no longer works for that user — use
+`specialist.test` (still bootstrapped) or a service account instead.
+
+## 2b. [BUG] The patient flow's OTP step is structurally suspect
+
+`patient-carer-browser Password+OTP` is a basic-flow containing `auth-password-form`
+(REQUIRED), `conditional-user-configured` (CONDITIONAL), then `auth-otp-form`
+(REQUIRED). Conditions are only evaluated inside a **CONDITIONAL sub-flow**; sitting
+loose in a basic-flow it likely does nothing, which would make OTP unconditionally
+required rather than "conditional on the user having OTP configured" as intended. Not
+verified either way — no patient login has ever been exercised. Confirm before relying
+on patient auth behaviour.
+
+## 2c. [ORIGINAL ANALYSIS — kept for context]
 
 `clinician-browser Forms` runs `auth-username-form` (REQUIRED) then
 `webauthn-authenticator-passwordless` (REQUIRED). Per Keycloak's

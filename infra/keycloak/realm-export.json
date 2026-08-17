@@ -688,7 +688,7 @@
           "autheticatorFlow": false
         },
         {
-          "requirement": "REQUIRED",
+          "requirement": "ALTERNATIVE",
           "priority": 30,
           "autheticatorFlow": true,
           "flowAlias": "patient-carer-browser Forms"
@@ -770,7 +770,7 @@
     {
       "id": "b6f10000-0000-4000-8000-0000000000c1",
       "alias": "clinician-browser",
-      "description": "Browser login for GP/specialist principals - passkey or hardware security key is mandatory (AAL2/AAL3). See identity-security-recommendations.md section 6.",
+      "description": "Browser login for GP/specialist principals - passkey is the only steady-state credential (AAL2/AAL3, see identity-security-recommendations.md section 6). A password is accepted ONLY as a first-login bootstrap for a clinician who has no passkey yet, and the webauthn-register-passwordless required action then forces enrolment; the bootstrap password must be removed once enrolled, after which the password branch is no longer selectable and only the passkey remains.",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -783,7 +783,7 @@
           "autheticatorFlow": false
         },
         {
-          "requirement": "REQUIRED",
+          "requirement": "ALTERNATIVE",
           "priority": 20,
           "autheticatorFlow": true,
           "flowAlias": "clinician-browser Forms"
@@ -804,11 +804,10 @@
           "autheticatorFlow": false
         },
         {
-          "authenticator": "webauthn-authenticator-passwordless",
           "requirement": "REQUIRED",
           "priority": 20,
-          "userSetupAllowed": true,
-          "autheticatorFlow": false
+          "autheticatorFlow": true,
+          "flowAlias": "clinician-browser Credential"
         }
       ]
     },
@@ -823,6 +822,29 @@
           "authenticator": "idp-confirm-link",
           "requirement": "REQUIRED",
           "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false
+        }
+      ]
+    },
+    {
+      "alias": "clinician-browser Credential",
+      "description": "Passkey, or password as a first-login bootstrap. Both are ALTERNATIVE: Keycloak only offers the passkey branch to a user who actually has a passkey credential, and only offers the password branch to a user who actually has a password. Keeping clinicians password-less after enrolment is therefore what enforces passkey-only login - it is a provisioning responsibility, not something this flow can express on its own.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "webauthn-authenticator-passwordless",
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false
+        },
+        {
+          "authenticator": "auth-password-form",
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
           "userSetupAllowed": false,
           "autheticatorFlow": false
         }
